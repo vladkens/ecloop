@@ -1,0 +1,18 @@
+name: ci
+
+on:
+  push:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - run: cc -v
+      - run: make build
+      - run: ./ecloop -v
+      - run: ./ecloop add -f data/btc-puzzles-hash -r 8000:ffff -q -o /dev/null

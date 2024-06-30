@@ -388,7 +388,7 @@ void sha256_final(u32 state[8], const u8 data[], u32 length) {
 static inline u32 rotr(u32 x, u32 n) { return (x >> n) | (x << (32 - n)); }
 static inline u32 MAJ(u32 a, u32 b, u32 c) { return (a & b) ^ (a & c) ^ (b & c); }
 static inline u32 CH(u32 e, u32 f, u32 g) { return (e & f) ^ (~e & g); }
-static inline void round(u32 a, u32 b, u32 c, u32 *d, u32 e, u32 f, u32 g, u32 *h, u32 m, u32 k) {
+static inline void ROUND(u32 a, u32 b, u32 c, u32 *d, u32 e, u32 f, u32 g, u32 *h, u32 m, u32 k) {
   u32 s = CH(e, f, g) + (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) + k + m;
   *d += s + *h;
   *h += s + MAJ(a, b, c) + (rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22));
@@ -426,14 +426,14 @@ void sha256_final(u32 state[8], const u8 data[], u32 length) {
     }
 
     for (int i = 0; i < 64; i += 8) {
-      round(a, b, c, &d, e, f, g, &h, w[i + 0], SHA256_K[i + 0]);
-      round(h, a, b, &c, d, e, f, &g, w[i + 1], SHA256_K[i + 1]);
-      round(g, h, a, &b, c, d, e, &f, w[i + 2], SHA256_K[i + 2]);
-      round(f, g, h, &a, b, c, d, &e, w[i + 3], SHA256_K[i + 3]);
-      round(e, f, g, &h, a, b, c, &d, w[i + 4], SHA256_K[i + 4]);
-      round(d, e, f, &g, h, a, b, &c, w[i + 5], SHA256_K[i + 5]);
-      round(c, d, e, &f, g, h, a, &b, w[i + 6], SHA256_K[i + 6]);
-      round(b, c, d, &e, f, g, h, &a, w[i + 7], SHA256_K[i + 7]);
+      ROUND(a, b, c, &d, e, f, g, &h, w[i + 0], SHA256_K[i + 0]);
+      ROUND(h, a, b, &c, d, e, f, &g, w[i + 1], SHA256_K[i + 1]);
+      ROUND(g, h, a, &b, c, d, e, &f, w[i + 2], SHA256_K[i + 2]);
+      ROUND(f, g, h, &a, b, c, d, &e, w[i + 3], SHA256_K[i + 3]);
+      ROUND(e, f, g, &h, a, b, c, &d, w[i + 4], SHA256_K[i + 4]);
+      ROUND(d, e, f, &g, h, a, b, &c, w[i + 5], SHA256_K[i + 5]);
+      ROUND(c, d, e, &f, g, h, a, &b, w[i + 6], SHA256_K[i + 6]);
+      ROUND(b, c, d, &e, f, g, h, &a, w[i + 7], SHA256_K[i + 7]);
     }
 
     state[0] += a;

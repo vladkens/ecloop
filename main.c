@@ -696,7 +696,7 @@ void usage(const char *name) {
 }
 
 void init(ctx_t *ctx, args_t *args) {
-  // check bench commands first
+  // check other commands first
   if (args->argc > 1) {
     if (strcmp(args->argv[1], "blf-gen") == 0) return blf_gen(args);
     if (strcmp(args->argv[1], "bench") == 0) return run_bench();
@@ -712,7 +712,7 @@ void init(ctx_t *ctx, args_t *args) {
   if (ctx->cmd == CMD_NIL) {
     if (args_bool(args, "-v")) printf("ecloop v%s\n", VERSION);
     else usage(args->argv[0]);
-    exit(1);
+    exit(0);
   }
 
   char *path = arg_str(args, "-f");
