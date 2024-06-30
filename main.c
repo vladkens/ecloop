@@ -1,20 +1,82 @@
+#include <math.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "lib/addr.c"
 #include "lib/bench.c"
 #include "lib/ecc.c"
+#include "lib/util.c"
 
-#define VERSION "0.2"
-#define JOB_SIZE 1024 * 1024 * 2
+#define VERSION "0.2.1"
+#define MAX_JOB_SIZE 1024 * 1024 * 2
 #define GROUP_INV_SIZE 1024
 
 typedef char hex40[41]; // rmd160 hex string
 typedef char hex64[65]; // sha256 hex string
+
+// MARK: args parser
+
+typedef struct args_t {
+  int argc;
+  const char **argv;
+} args_t;
+
+bool args_bool(args_t *args, const char *name) {
+  for (int i = 1; i < args->argc; ++i) {
+    if (strcmp(args->argv[i], name) == 0) return true;
+  }
+  return false;
+}
+
+int args_int(args_t *args, const char *name, int def) {
+  for (int i = 1; i < args->argc - 1; ++i) {
+    if (strcmp(args->argv[i], name) == 0) {
+      return strtoul(args->argv[i + 1], NULL, 10);
+    }
+  }
+  return def;
+}
+
+char *arg_str(args_t *args, const char *name) {
+  for (int i = 1; i < args->argc; ++i) {
+    if (strcmp(args->argv[i], name) == 0) {
+      if (i + 1 < args->argc) return (char *)args->argv[i + 1];
+    }
+  }
+  return NULL;
+}
+
+void arg_search_range(args_t *args, fe range_s, fe range_e) {
+  char *raw = arg_str(args, "-r");
+  if (!raw) {
+    fe_set64(range_s, GROUP_INV_SIZE);
+    fe_clone(range_e, P);
+    return;
+  }
+
+  char *sep = strchr(raw, ':');
+  if (!sep) {
+    fprintf(stderr, "invalid search range, use format: -r 8000:ffff\n");
+    exit(1);
+  }
+
+  *sep = 0;
+  fe_from_hex(range_s, raw);
+  fe_from_hex(range_e, sep + 1);
+
+  if (fe_cmp64(range_s, GROUP_INV_SIZE) < 0) fe_set64(range_s, GROUP_INV_SIZE);
+  if (fe_cmp(range_e, P) > 0) fe_clone(range_e, P);
+
+  if (fe_cmp(range_s, range_e) >= 0) {
+    fprintf(stderr, "invalid search range, start >= end\n");
+    exit(1);
+  }
+}
 
 // MARK: hex64 queue
 
@@ -125,7 +187,7 @@ typedef struct blf_t {
 } blf_t;
 
 static inline void blf_setbit(blf_t *blf, size_t idx) {
-  blf->bits[idx % blf->size] |= 1 << (idx % 64);
+  blf->bits[idx % blf->size] |= (u64)1 << (idx % 64);
 }
 
 static inline bool blf_getbit(blf_t *blf, u64 idx) {
@@ -198,63 +260,82 @@ bool blf_has(blf_t *blf, const h160_t hash) {
   return true;
 }
 
-// MARK: args parser
-
-typedef struct args_t {
-  int argc;
-  const char **argv;
-} args_t;
-
-bool args_bool(args_t *args, const char *name) {
-  for (int i = 1; i < args->argc; ++i) {
-    if (strcmp(args->argv[i], name) == 0) return true;
-  }
-  return false;
+void blf_gen_usage(args_t *args) {
+  printf("Usage: %s blf-gen -n <count> -o <file>\n", args->argv[0]);
+  printf("Generate a bloom filter from a list of hex-encoded hash160 values passed to stdin.\n");
+  printf("\nOptions:\n");
+  printf("  -n <count>      - Number of hashes to add.\n");
+  printf("  -o <file>       - File to write bloom filter (must have a .blf extension).\n");
+  exit(1);
 }
 
-int args_int(args_t *args, const char *name, int def) {
-  for (int i = 1; i < args->argc - 1; ++i) {
-    if (strcmp(args->argv[i], name) == 0) {
-      return strtoul(args->argv[i + 1], NULL, 10);
-    }
-  }
-  return def;
-}
-
-char *arg_str(args_t *args, const char *name) {
-  for (int i = 1; i < args->argc; ++i) {
-    if (strcmp(args->argv[i], name) == 0) {
-      if (i + 1 < args->argc) return (char *)args->argv[i + 1];
-    }
-  }
-  return NULL;
-}
-
-void arg_search_range(args_t *args, fe range_s, fe range_e) {
-  char *raw = arg_str(args, "-r");
-  if (!raw) {
-    fe_set64(range_s, GROUP_INV_SIZE);
-    fe_clone(range_e, P);
-    return;
+void blf_gen(args_t *args) {
+  u64 n = args_int(args, "-n", 0);
+  if (n == 0) {
+    fprintf(stderr, "[!] missing filter size (-n <number>)\n");
+    return blf_gen_usage(args);
   }
 
-  char *sep = strchr(raw, ':');
-  if (!sep) {
-    fprintf(stderr, "invalid search range, use format: -r 8000:ffff\n");
+  char *outfile = arg_str(args, "-o");
+  if (outfile == NULL) {
+    fprintf(stderr, "[!] missing output file (-o <file>)\n");
+    return blf_gen_usage(args);
+  }
+
+  if (!strendswith(outfile, ".blf")) {
+    fprintf(stderr, "output file should have .blf extension\n");
     exit(1);
   }
 
-  *sep = 0;
-  fe_from_hex(range_s, raw);
-  fe_from_hex(range_e, sep + 1);
-
-  if (fe_cmp64(range_s, GROUP_INV_SIZE) < 0) fe_set64(range_s, GROUP_INV_SIZE);
-  if (fe_cmp(range_e, P) > 0) fe_clone(range_e, P);
-
-  if (fe_cmp(range_s, range_e) >= 0) {
-    fprintf(stderr, "invalid search range, start >= end\n");
+  if (access(outfile, F_OK) == 0) {
+    fprintf(stderr, "output file already exists\n");
     exit(1);
   }
+
+  // https://hur.st/bloomfilter/
+  double p = 1.0 / 1000000.0;
+  u64 m = (u64)(n * log(p) / log(1.0 / pow(2.0, log(2.0))));
+  printf("creating bloom filter: n = %llu; p = %f; m = %llu\n", n, p, m);
+
+  u64 size = (m + 63) / 64;
+  u64 *bits = calloc(size, sizeof(u64));
+  blf_t blf = {size, bits};
+
+  u64 count = 0;
+  hex40 line;
+  while (fgets(line, sizeof(line), stdin) != NULL) {
+    if (strlen(line) != sizeof(line) - 1) continue;
+
+    h160_t hash;
+    for (size_t j = 0; j < sizeof(line) - 1; j += 8) {
+      sscanf(line + j, "%8x", &hash[j / 8]);
+    }
+
+    count += 1;
+    blf_add(&blf, hash);
+    // printf("verify: %s %d\n", line, blf_has(&blf, hash));
+  }
+
+  printf("added %llu hashes\n", count);
+
+  FILE *file = fopen(outfile, "wb");
+  if (file == NULL) {
+    fprintf(stderr, "failed to open output file\n");
+    exit(1);
+  }
+
+  if (fwrite(&size, sizeof(size), 1, file) != 1) {
+    fprintf(stderr, "failed to write bloom filter size\n");
+    exit(1);
+  }
+
+  if (fwrite(bits, sizeof(u64), size, file) != size) {
+    fprintf(stderr, "failed to write bloom filter bits\n");
+    exit(1);
+  }
+
+  fclose(file);
+  free(bits);
 }
 
 // MARK: shared context
@@ -272,8 +353,8 @@ typedef struct ctx_t {
   bool check_addr33;
   bool check_addr65;
 
-  bool verbose;
   FILE *outfile;
+  bool quiet;
 
   // filter file (bloom filter or hashes to search)
   h160_t *to_find_hashes;
@@ -284,6 +365,7 @@ typedef struct ctx_t {
   fe range_s; // search range start
   fe range_e; // search range end
   pe gpoints[GROUP_INV_SIZE];
+  u64 job_size;
 
   // cmd mul
   queue_t queue;
@@ -357,7 +439,7 @@ void ctx_print_status(ctx_t *ctx) {
 void ctx_write_found(ctx_t *ctx, const char *label, const h160_t hash, const fe pk) {
   pthread_mutex_lock(&ctx->lock);
 
-  if (ctx->verbose) {
+  if (!ctx->quiet) {
     printf("\033[F\n%s: %08x%08x%08x%08x%08x <- %016llx%016llx%016llx%016llx\n", //
            label, hash[0], hash[1], hash[2], hash[3], hash[4],                   //
            pk[3], pk[2], pk[1], pk[0]);
@@ -473,16 +555,21 @@ void *cmd_add_worker(void *arg) {
   ctx_t *ctx = (ctx_t *)arg;
 
   fe pk;
-  while (fe_cmp(ctx->range_s, ctx->range_e) < 0) {
+  while (true) {
     pthread_mutex_lock(&ctx->lock);
+    if (fe_cmp(ctx->range_s, ctx->range_e) >= 0) {
+      pthread_mutex_unlock(&ctx->lock);
+      break;
+    }
+
     fe_clone(pk, ctx->range_s);
-    fe_add64(ctx->range_s, JOB_SIZE);
+    fe_add64(ctx->range_s, ctx->job_size);
     pthread_mutex_unlock(&ctx->lock);
 
-    u64 found = batch_add(ctx, pk, JOB_SIZE);
+    u64 found = batch_add(ctx, pk, ctx->job_size);
 
     pthread_mutex_lock(&ctx->lock);
-    ctx->k_checked += JOB_SIZE;
+    ctx->k_checked += ctx->job_size;
     ctx->k_found += found;
     pthread_mutex_unlock(&ctx->lock);
     ctx_print_status(ctx);
@@ -499,6 +586,10 @@ int cmd_add(ctx_t *ctx) {
     ec_jacobi_add(ctx->gpoints + i, ctx->gpoints + i - 1, &G1);
     ec_jacobi_rdc(ctx->gpoints + i, ctx->gpoints + i);
   }
+
+  fe range_size;
+  fe_modsub(range_size, ctx->range_e, ctx->range_s);
+  ctx->job_size = fe_cmp64(range_size, MAX_JOB_SIZE) < 0 ? range_size[0] : MAX_JOB_SIZE;
 
   for (size_t i = 0; i < ctx->threads_count; ++i) {
     pthread_create(&ctx->threads[i], NULL, cmd_add_worker, ctx);
@@ -585,22 +676,29 @@ int cmd_mul(ctx_t *ctx) {
 // MARK: main
 
 void usage(const char *name) {
-  printf("Usage: %s <cmd> [-t <threads>] [-f <filepath>] [-a <addr_type>] [-r <range>]\n", name);
+  printf("Usage: %s <cmd> [-t <threads>] [-f <file>] [-a <addr_type>] [-r <range>]\n", name);
   printf("v%s ~ https://github.com/vladkens/ecloop\n", VERSION);
-  printf("\nCommands:\n");
-  printf("  add - search in given range with batch addition\n");
-  printf("  mul - search hex encoded private keys (from stdin)\n");
-  printf("\nOptions:\n");
-  printf("  -f <filepath>    - filter file to search (list of hashes or bloom fitler)\n");
-  printf("  -o <fielpath>    - output file to write found keys (default: stdout)\n");
-  printf("  -t <threads>     - number of threads to run (default: 1)\n");
-  printf("  -a <addr_type>   - address type to search: c - addr33, u - addr65 (default: c)\n");
-  printf("  -r <range>       - search range in hex format (example: 8000:ffff, default all)\n");
+  printf("\nCompute commands:\n");
+  printf("  add             - search in given range with batch addition\n");
+  printf("  mul             - search hex encoded private keys (from stdin)\n");
+  printf("\nCompute options:\n");
+  printf("  -f <file>       - filter file to search (list of hashes or bloom fitler)\n");
+  printf("  -o <file>       - output file to write found keys (default: stdout)\n");
+  printf("  -t <threads>    - number of threads to run (default: 1)\n");
+  printf("  -a <addr_type>  - address type to search: c - addr33, u - addr65 (default: c)\n");
+  printf("  -r <range>      - search range in hex format (example: 8000:ffff, default all)\n");
+  printf("  -q              - quiet mode (no output to stdout; -o required)\n");
+  printf("\nOther commands:\n");
+  printf("  blf-gen         - create bloom filter from list of hex-encoded hash160\n");
+  printf("  bench           - run benchmark of internal functions\n");
+  printf("  bench-gtable    - run benchmark of ecc multiplication (with different table size)\n");
+  printf("\n");
 }
 
 void init(ctx_t *ctx, args_t *args) {
   // check bench commands first
   if (args->argc > 1) {
+    if (strcmp(args->argv[1], "blf-gen") == 0) return blf_gen(args);
     if (strcmp(args->argv[1], "bench") == 0) return run_bench();
     if (strcmp(args->argv[1], "bench-gtable") == 0) return run_bench_gtable();
   }
@@ -620,12 +718,12 @@ void init(ctx_t *ctx, args_t *args) {
   char *path = arg_str(args, "-f");
   load_filter(ctx, path);
 
-  ctx->verbose = args_bool(args, "-v");
+  ctx->quiet = args_bool(args, "-q");
   char *outfile = arg_str(args, "-o");
   if (outfile) ctx->outfile = fopen(outfile, "a");
 
-  if (outfile == NULL && !ctx->verbose) {
-    fprintf(stderr, "use -v to enable verbose mode or -o <file> to write output\n");
+  if (outfile == NULL && ctx->quiet) {
+    fprintf(stderr, "quiet mode chosen without output file\n");
     exit(1);
   }
 

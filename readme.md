@@ -27,16 +27,22 @@ make
 ```text
 Usage: ecloop <cmd> [-t <threads>] [-f <filepath>] [-a <addr_type>] [-r <range>]
 
-Commands:
-  add - search in given range with batch addition
-  mul - search hex encoded private keys (from stdin)
+Compute commands:
+  add             - search in given range with batch addition
+  mul             - search hex encoded private keys (from stdin)
 
-Options:
-  -t <threads>     - number of threads to run (default: 1)
-  -f <filepath>    - filter file to search (list of hashes or bloom fitler)
-  -a <addr_type>   - address type to search: c - addr33, u - addr65 (default: c)
-  -r <range>       - search range in hex format (example: 8000:ffff, default all)
-  -o <fielpath>    - output file to write found keys (default: stdout)
+Compute options:
+  -f <file>       - filter file to search (list of hashes or bloom fitler)
+  -o <file>       - output file to write found keys (default: stdout)
+  -t <threads>    - number of threads to run (default: 1)
+  -a <addr_type>  - address type to search: c - addr33, u - addr65 (default: c)
+  -r <range>      - search range in hex format (example: 8000:ffff, default all)
+  -q              - quiet mode (no output to stdout; -o required)
+
+Other commands:
+  blf-gen         - create bloom filter from list of hex-encoded hash160
+  bench           - run benchmark of internal functions
+  bench-gtable    - run benchmark of ecc multiplication (with different table size)
 ```
 
 ### Example 1: Check keys in given range (sequential addition)
@@ -53,6 +59,17 @@ ecloop add -f data/btc-puzzles-hash -t 4 -r 800000:ffffff -o /tmp/found.txt
 
 ```sh
 echo privkeys.txt | ecloop mul -f data/btc-puzzles.blf -a cu -t 8
+```
+
+### Example 3: Generating bloom filter
+
+`cat` reads the list of hex-encoded hash160 values from a file. `-n` specifies the number of entries for the Bloom filter (count of hashes). `-o` defines the output where to write filter (`.blf` extension requried).
+
+Bloom filter uses p = 0.000001 (1 in 1,000,000 false positive). You can adjusting this option by playing with `n`. See [Bloom Filter Calculator](https://hur.st/bloomfilter/?n=1024&p=0.000001&m=&k=20). List of all addressed can be found [here](https://bitcointalk.org/index.php?topic=5265993.0). 
+
+
+```sh
+cat data/btc-puzzles-hash | ./ecloop blf-gen -n 1024 -o /tmp/test.blf
 ```
 
 ## Benchmark
@@ -88,3 +105,4 @@ This project is written to learn the math over elliptic curves in cryptocurrenci
 
 - [ryancdotorg/brainflayer](https://github.com/ryancdotorg/brainflayer)
 - [albertobsd/keyhunt](https://github.com/albertobsd/keyhunt)
+- [JeanLucPons/VanitySearch](https://github.com/JeanLucPons/VanitySearch)

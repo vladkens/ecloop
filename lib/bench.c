@@ -1,15 +1,8 @@
 #pragma once
-#include <time.h>
 
 #include "addr.c"
 #include "ecc.c"
-
-size_t tsnow() {
-  struct timespec ts;
-  // clock_gettime(CLOCK_MONOTONIC, &ts);
-  clock_gettime(CLOCK_REALTIME, &ts);
-  return ts.tv_sec * 1000 + ts.tv_nsec / 1e6;
-}
+#include "util.c"
 
 void print_res(char *label, u64 stime, u64 iters) {
   double dt = (tsnow() - stime) / 1000.0;
@@ -114,21 +107,24 @@ void run_bench_gtable() {
 
   u64 iters = 1000 * 500;
   u64 stime;
-  double initt, jobt;
+  double gent, mult;
   pe g;
 
+  size_t mem_used;
   for (int i = 8; i <= 22; i += 2) {
     GTABLE_W = i;
 
     stime = tsnow();
-    ec_gtable_init();
-    initt = ((double)(tsnow() - stime)) / 1000;
+    mem_used = ec_gtable_init();
+    gent = ((double)(tsnow() - stime)) / 1000;
 
     stime = tsnow();
     for (u64 i = 0; i < iters; ++i) ec_gtable_mul(&g, numbers[i % numSize]);
-    jobt = ((double)(tsnow() - stime)) / 1000;
+    mult = ((double)(tsnow() - stime)) / 1000;
 
-    printf("w=%02d: %.1fk it/s ~ %5.2fs / %5.2fs\n", i, iters / jobt / 1000, initt, jobt);
+    double mem = (double)mem_used / 1024 / 1024;                              // MB
+    printf("w=%02d: %.1fK it/s | gen: %5.2fs | mul: %5.2fs | mem: %8.1fMB\n", //
+           i, iters / mult / 1000, gent, mult, mem);
   }
 }
 

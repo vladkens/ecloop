@@ -1,7 +1,7 @@
-CLANG_FLAGS ?= -O3
+CC_FLAGS ?= -O3
 
 ifeq ($(shell uname -m),x86_64)
-	CLANG_FLAGS += -msse4.1 -msha
+	CC_FLAGS += -msse4.1 -msha
 endif
 
 default: build
@@ -10,10 +10,15 @@ clean:
 	@rm -rf ecloop bench main a.out *.profraw *.profdata
 
 build: clean
-	@clang $(CLANG_FLAGS) main.c -o ecloop
+	@CC $(CC_FLAGS) main.c -o ecloop
 
 add: build
-	./ecloop add -f data/btc-puzzles-hash -t 1 -r 800000:ffffff -o /tmp/abc.csv
+	./ecloop add -f data/btc-puzzles-hash -t 8 -r 8000:ffffff -v
 
 mul: build
-	cat data.txt | ./ecloop mul -t 8 -f _check_1.txt -a cu -o /tmp/abc.csv
+	cat data.txt | ./ecloop mul -f _check_1.txt -t 8 -a cu -v
+
+blf-test: build
+	@rm -rf /tmp/test.blf
+	cat data/btc-puzzles-hash | ./ecloop blf-gen -n 1024 -o /tmp/test.blf
+	./ecloop add -f /tmp/test.blf -t 8 -r 8000:ffffff -v

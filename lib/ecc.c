@@ -721,13 +721,14 @@ pe *_gtable = NULL;
 
 // https://www.sav.sk/journals/uploads/0215094304C459.pdf (Algorithm 3)
 
-void ec_gtable_init() {
+size_t ec_gtable_init() {
   u64 n = 1 << GTABLE_W;
   u64 d = ((256 - 1) / GTABLE_W) + 1;
   u64 s = n * d - d;
 
+  size_t mem_size = s * sizeof(pe);
   if (_gtable != NULL) free(_gtable);
-  _gtable = (pe *)malloc(s * sizeof(pe));
+  _gtable = (pe *)malloc(mem_size);
 
   pe b, p;
   pe_clone(&b, &G1);
@@ -744,6 +745,7 @@ void ec_gtable_init() {
   }
 
   ec_jacobi_grprdc(_gtable, s);
+  return mem_size;
 }
 
 void ec_gtable_mul(pe *r, const fe pk) {
