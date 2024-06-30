@@ -1,43 +1,18 @@
 #pragma once
 #include <ctype.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define CONSTV static const
-#define INLINE static inline
-
 #define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
 #define MAX(X, Y) (((X) > (Y)) ? (X) : (Y))
-#define IS_EVEN(a) ((a[0] & 1) == 0)
+#define INLINE static inline
 
 typedef __uint128_t u128;
 typedef unsigned long long u64;
 typedef unsigned int u32;
 typedef unsigned char u8;
-typedef u64 fe[4];
-
-typedef struct pe {
-  fe x, y, z;
-} pe;
-
-CONSTV fe P = {0xfffffffefffffc2f, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff};
-
-CONSTV pe G1 = {
-    .x = {0x59f2815b16f81798, 0x029bfcdb2dce28d9, 0x55a06295ce870b07, 0x79be667ef9dcbbac},
-    .y = {0x9c47d08ffb10d4b8, 0xfd17b448a6855419, 0x5da4fbfc0e1108a8, 0x483ada7726a3c465},
-    .z = {0x1, 0x0, 0x0, 0x0},
-};
-
-CONSTV pe G2 = {
-    .x = {0xabac09b95c709ee5, 0x5c778e4b8cef3ca7, 0x3045406e95c07cd8, 0xc6047f9441ed7d6d},
-    .y = {0x236431a950cfe52a, 0xf7f632653266d0e1, 0xa3c58419466ceaee, 0x1ae168fea63dc339},
-    .z = {0x1, 0x0, 0x0, 0x0},
-};
-
-void fe_print(const char *label, const fe a) {
-  printf("%s: %016llx %016llx %016llx %016llx\n", label, a[3], a[2], a[1], a[0]);
-}
 
 INLINE u64 umul128(const u64 a, const u64 b, u64 *hi) {
   // https://stackoverflow.com/a/50958815
@@ -47,8 +22,23 @@ INLINE u64 umul128(const u64 a, const u64 b, u64 *hi) {
   return t;
 }
 
-INLINE void fe_clone(fe r, const fe a) { memcpy(r, a, sizeof(fe)); }
+// MARK: Field element
+typedef u64 fe[4]; // (256bit as 4x64bit)
 
+// prime field P = 2^256 - 2^32 - 977
+static const fe P = {
+    0xfffffffefffffc2f,
+    0xffffffffffffffff,
+    0xffffffffffffffff,
+    0xffffffffffffffff,
+};
+
+INLINE void fe_print(const char *label, const fe a) {
+  printf("%s: %016llx %016llx %016llx %016llx\n", label, a[3], a[2], a[1], a[0]);
+}
+
+INLINE bool fe_iszero(const fe r) { return r[0] == 0 && r[1] == 0 && r[2] == 0 && r[3] == 0; }
+INLINE void fe_clone(fe r, const fe a) { memcpy(r, a, sizeof(fe)); }
 INLINE void fe_set64(fe r, const u64 a) {
   memset(r, 0, sizeof(fe));
   r[0] = a;
@@ -78,7 +68,7 @@ int fe_cmp(const fe a, const fe b) {
   return 0;
 }
 
-// modular arithmetic
+// MARK: modular arithmetic
 
 void fe_modneg(fe r, const fe a) { // r = -a (mod P)
   u64 c = 0;
@@ -269,11 +259,11 @@ void fe_modsqr(fe r, const fe a) {
   if (fe_cmp(r, P) >= 0) fe_modsub(r, r, P);
 }
 
-INLINE void fe_div2(u64 r[4]) {
-  r[0] = (r[0] >> 1) | (r[1] << 63);
-  r[1] = (r[1] >> 1) | (r[2] << 63);
-  r[2] = (r[2] >> 1) | (r[3] << 63);
-  r[3] = (r[3] >> 1);
+INLINE void fe_shiftr(fe r, u8 n) {
+  r[0] = (r[0] >> n) | (r[1] << (64 - n));
+  r[1] = (r[1] >> n) | (r[2] << (64 - n));
+  r[2] = (r[2] >> n) | (r[3] << (64 - n));
+  r[3] = (r[3] >> n);
 }
 
 void _fe_modinv_binpow(fe r, const fe a) {
@@ -284,10 +274,10 @@ void _fe_modinv_binpow(fe r, const fe a) {
   fe_clone(t, a);
   p[0] -= 2;
 
-  while (p[0] || p[1] || p[2] || p[3]) { // p > 0
-    if (!IS_EVEN(p)) fe_modmul(q, q, t);
+  while (p[0] || p[1] || p[2] || p[3]) {     // p > 0
+    if ((a[0] & 1) != 0) fe_modmul(q, q, t); // when odd
     fe_modsqr(t, t);
-    fe_div2(p);
+    fe_shiftr(p, 1);
   }
 
   fe_clone(r, q);
@@ -374,13 +364,51 @@ void fe_grpinv(fe r[], const u32 n) {
   free(zs);
 }
 
-// elliptic curve
+void fe_from_hex(fe r, const char *hex) {
+  // load dynamic length hex string into 256bit integer (from right to left)
+  fe_set64(r, 0);
+
+  int cnt = 0, len = strlen(hex);
+  while (len-- > 0) {
+    u64 v = tolower(hex[len]);
+    if (v >= '0' && v <= '9') v = v - '0';
+    else if (v >= 'a' && v <= 'f') v = v - 'a' + 10;
+    else continue;
+
+    r[cnt / 16] = (v << (cnt * 4 % 64)) | r[cnt / 16];
+    cnt += 1;
+  }
+
+  if (fe_cmp(r, P) >= 0) fe_modsub(r, r, P);
+}
+
+// MARK: EC Point
+// https://eprint.iacr.org/2015/1060.pdf
+// https://hyperelliptic.org/EFD/g1p/auto-shortw.html
+
+typedef struct pe {
+  fe x, y, z;
+} pe;
+
+static const pe G1 = {
+    .x = {0x59f2815b16f81798, 0x029bfcdb2dce28d9, 0x55a06295ce870b07, 0x79be667ef9dcbbac},
+    .y = {0x9c47d08ffb10d4b8, 0xfd17b448a6855419, 0x5da4fbfc0e1108a8, 0x483ada7726a3c465},
+    .z = {0x1, 0x0, 0x0, 0x0},
+};
+
+static const pe G2 = {
+    .x = {0xabac09b95c709ee5, 0x5c778e4b8cef3ca7, 0x3045406e95c07cd8, 0xc6047f9441ed7d6d},
+    .y = {0x236431a950cfe52a, 0xf7f632653266d0e1, 0xa3c58419466ceaee, 0x1ae168fea63dc339},
+    .z = {0x1, 0x0, 0x0, 0x0},
+};
 
 void pe_clone(pe *r, const pe *a) {
   fe_clone(r->x, a->x);
   fe_clone(r->y, a->y);
   fe_clone(r->z, a->z);
 }
+
+// https://en.wikibooks.org/wiki/Cryptography/Prime_Curve/Affine_Coordinates
 
 void ec_affine_dbl(pe *r, const pe *p) {
   // λ = (3 * x^2) / (2 * y)
@@ -420,7 +448,7 @@ void ec_affine_add(pe *r, const pe *p, const pe *q) {
   fe_clone(r->x, t3);
 }
 
-// https://en.wikibooks.org/wiki/Cryptography/Prime_Curve/Jacobian_Coordinates
+// https://en.wikibooks.org/wiki/Cryptography/Prime_Curve/Standard_Projective_Coordinates
 
 void _ec_jacobi_dbl1(pe *r, const pe *p) {
   // W = a*Z^2 + 3*X^2
@@ -497,13 +525,29 @@ void _ec_jacobi_add1(pe *r, const pe *p, const pe *q) {
 }
 
 void _ec_jacobi_rdc1(pe *r, const pe *a) {
-  // reduce Jacobian to affine
+  // reduce Standard Projective to Affine
   fe_clone(r->z, a->z);
   fe_modinv(r->z, r->z);
   fe_modmul(r->x, a->x, r->z);
   fe_modmul(r->y, a->y, r->z);
   fe_set64(r->z, 0x1);
 }
+
+void _ec_jacobi_grprdc1(pe r[], u64 n) {
+  fe *zz = (fe *)malloc(n * sizeof(fe));
+  for (u64 i = 0; i < n; ++i) fe_clone(zz[i], r[i].z);
+  fe_grpinv(zz, n);
+
+  for (u64 i = 0; i < n; ++i) {
+    fe_modmul(r[i].x, r[i].x, zz[i]);
+    fe_modmul(r[i].y, r[i].y, zz[i]);
+    fe_set64(r[i].z, 0x1);
+  }
+
+  free(zz);
+}
+
+// https://en.wikibooks.org/wiki/Cryptography/Prime_Curve/Jacobian_Coordinates
 
 void _ec_jacobi_dbl2(pe *r, const pe *p) {
   // if (Y == 0) return POINT_AT_INFINITY
@@ -573,6 +617,7 @@ void _ec_jacobi_add2(pe *r, const pe *p, const pe *q) {
 }
 
 void _ec_jacobi_rdc2(pe *r, const pe *a) {
+  // reduce Jacobian to Affine
   fe t;
   fe_clone(r->z, a->z);
   fe_modinv(r->z, r->z);
@@ -583,6 +628,23 @@ void _ec_jacobi_rdc2(pe *r, const pe *a) {
   fe_set64(r->z, 0x1);
 }
 
+void _ec_jacobi_grprdc2(pe r[], u64 n) {
+  fe *zz = (fe *)malloc(n * sizeof(fe));
+  for (u64 i = 0; i < n; ++i) fe_clone(zz[i], r[i].z);
+  fe_grpinv(zz, n);
+
+  fe z = {0};
+  for (u64 i = 0; i < n; ++i) {
+    fe_modsqr(z, zz[i]);          // z^2
+    fe_modmul(r[i].x, r[i].x, z); // x = x * z^2
+    fe_modmul(z, z, zz[i]);       // z^3
+    fe_modmul(r[i].y, r[i].y, z); // y = y * z^3
+    fe_set64(r[i].z, 0x1);
+  }
+
+  free(zz);
+}
+
 // v1. add: ~6.6M it/s, dbl: ~5.6M it/s
 // v2. add: ~5.4M it/s, dbl: ~7.8M it/s
 // v1 is used because add operation is more frequent
@@ -590,9 +652,32 @@ void _ec_jacobi_rdc2(pe *r, const pe *a) {
 INLINE void ec_jacobi_dbl(pe *r, const pe *p) { return _ec_jacobi_dbl1(r, p); }
 INLINE void ec_jacobi_add(pe *r, const pe *p, const pe *q) { return _ec_jacobi_add1(r, p, q); }
 INLINE void ec_jacobi_rdc(pe *r, const pe *a) { return _ec_jacobi_rdc1(r, a); }
+INLINE void ec_jacobi_grprdc(pe r[], u64 n) { return _ec_jacobi_grprdc1(r, n); }
+// INLINE void ec_jacobi_dbl(pe *r, const pe *p) { return _ec_jacobi_dbl2(r, p); }
+// INLINE void ec_jacobi_add(pe *r, const pe *p, const pe *q) { return _ec_jacobi_add2(r, p, q); }
+// INLINE void ec_jacobi_rdc(pe *r, const pe *a) { return _ec_jacobi_rdc2(r, a); }
+// INLINE void ec_jacobi_grprdc(pe r[], u64 n) { return _ec_jacobi_grprdc2(r, n); }
+
+//
+
+bool ec_verify(const pe *p) {
+  // y^2 = x^3 + 7
+  pe q, g;
+  pe_clone(&q, p);
+  ec_jacobi_rdc(&q, &q);
+
+  pe_clone(&g, &q);
+  fe_modsqr(g.y, g.y);      // y^2
+  fe_modsqr(g.x, g.x);      // x^2
+  fe_modmul(g.x, g.x, q.x); // x^3
+  fe_modsub(g.y, g.y, g.x); // y^2 - x^3
+  return g.y[0] == 7 && g.y[1] == 0 && g.y[2] == 0 && g.y[3] == 0;
+}
+
+//
 
 void ec_jacobi_mul(pe *r, const pe *p, const fe k) {
-  // Montgomery ladder in Jacobian space
+  // double-and-add in Jacobian space
   pe t;
   fe_clone(t.x, p->x);
   fe_clone(t.y, p->y);
@@ -629,22 +714,58 @@ void ec_jacobi_mul(pe *r, const pe *p, const fe k) {
   }
 }
 
-// utility
+// MARK: EC GTable
 
-void fe_from_hex(fe r, const char *hex) {
-  // load dynamic length hex string into 256bit integer (from right to left)
-  fe_set64(r, 0);
+u64 GTABLE_W = 14;
+pe *_gtable = NULL;
 
-  int cnt = 0, len = strlen(hex);
-  while (len-- > 0) {
-    u64 v = tolower(hex[len]);
-    if (v >= '0' && v <= '9') v = v - '0';
-    else if (v >= 'a' && v <= 'f') v = v - 'a' + 10;
-    else continue;
+// https://www.sav.sk/journals/uploads/0215094304C459.pdf (Algorithm 3)
 
-    r[cnt / 16] = (v << (cnt * 4 % 64)) | r[cnt / 16];
-    cnt += 1;
+void ec_gtable_init() {
+  u64 n = 1 << GTABLE_W;
+  u64 d = ((256 - 1) / GTABLE_W) + 1;
+  u64 s = n * d - d;
+
+  if (_gtable != NULL) free(_gtable);
+  _gtable = (pe *)malloc(s * sizeof(pe));
+
+  pe b, p;
+  pe_clone(&b, &G1);
+  for (u64 i = 0; i < d; ++i) {
+    u64 x = (n - 1) * i;
+    pe_clone(&_gtable[x], &b);
+    pe_clone(&p, &b);
+    for (u64 j = 1; j < n - 1; ++j) {
+      j == 1 ? ec_jacobi_dbl(&p, &p) : ec_jacobi_add(&p, &p, &b);
+      x = (n - 1) * i + j;
+      pe_clone(&_gtable[x], &p);
+    }
+    ec_jacobi_add(&b, &p, &b);
   }
 
-  if (fe_cmp(r, P) >= 0) fe_modsub(r, r, P);
+  ec_jacobi_grprdc(_gtable, s);
+}
+
+void ec_gtable_mul(pe *r, const fe pk) {
+  if (_gtable == NULL) {
+    printf("GTable is not initialized\n");
+    exit(1);
+  }
+
+  u64 n = 1 << GTABLE_W;
+  u64 d = ((256 - 1) / GTABLE_W) + 1;
+  pe q = {0};
+  fe k;
+  fe_clone(k, pk);
+
+  for (u64 i = 0; i < d; ++i) {
+    u64 b = k[0] & (n - 1);
+    fe_shiftr(k, GTABLE_W);
+    if (!b) continue;
+
+    u64 x = (n - 1) * i + b - 1;
+    fe_iszero(q.x) ? pe_clone(&q, &_gtable[x]) : ec_jacobi_add(&q, &q, &_gtable[x]);
+  }
+
+  pe_clone(r, &q);
 }

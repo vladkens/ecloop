@@ -1,5 +1,5 @@
 #pragma once
-#include "ec64.c"
+#include "ecc.c"
 #include "rmd160.c"
 #include "sha256.c"
 

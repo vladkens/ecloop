@@ -1,0 +1,9 @@
+{
+  "files.exclude": {
+    "a.out": true,
+    "ecloop": true,
+  },
+  "search.exclude": {
+    "temp.txt": true
+  }
+}
