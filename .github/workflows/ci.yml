@@ -2,6 +2,12 @@ name: ci
 
 on:
   push:
+    branches:
+      - '**'
+    paths:
+      - .github/workflows/*.yml
+      - lib/**
+      - main.c
 
 jobs:
   build:
