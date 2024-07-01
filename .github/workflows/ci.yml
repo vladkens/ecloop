@@ -17,8 +17,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      - if: matrix.os == 'ubuntu-latest'
+        run: sudo apt update && sudo apt install -y clang
       
-      - run: cc -v
+      - run: clang -v
       - run: make build
       - run: ./ecloop -v
       - run: ./ecloop add -f data/btc-puzzles-hash -r 8000:ffff -q -o /dev/null

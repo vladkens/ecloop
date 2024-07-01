@@ -19,8 +19,10 @@ A high-performance, CPU-optimized tool for computing public keys on the secp256k
 
 ```sh
 git clone https://github.com/vladkens/ecloop.git && cd ecloop
-make
+make build
 ```
+
+Note: Build has been tested with `clang`. It may work with `gcc14`, but this has not been thoroughly tested. If anyone knows how to get this to work with gcc14 or earlier – I'd be happy to get a PR.
 
 ## Usage
 

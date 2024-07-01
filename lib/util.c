@@ -5,7 +5,7 @@
 #include <string.h>
 #include <time.h>
 
-size_t tsnow() {
+unsigned long long tsnow() {
   struct timespec ts;
   // clock_gettime(CLOCK_MONOTONIC, &ts);
   clock_gettime(CLOCK_REALTIME, &ts);

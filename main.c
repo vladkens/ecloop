@@ -600,6 +600,7 @@ int cmd_add(ctx_t *ctx) {
   }
 
   ctx_print_status(ctx);
+  printf("\n");
   return 0;
 }
 
@@ -670,6 +671,7 @@ int cmd_mul(ctx_t *ctx) {
   }
 
   ctx_print_status(ctx);
+  printf("\n");
   return 0;
 }
 

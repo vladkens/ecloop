@@ -5,7 +5,7 @@
 #include "util.c"
 
 void print_res(char *label, u64 stime, u64 iters) {
-  double dt = (tsnow() - stime) / 1000.0;
+  double dt = MAX((tsnow() - stime), 1) / 1000.0;
   printf("%20s: %.2fM it/s ~ %.2fs\n", label, iters / dt / 1000000, dt);
 }
 
@@ -17,8 +17,7 @@ void fe_rand(fe r) {
 void run_bench() {
   ec_gtable_init();
 
-  u64 stime;
-  u64 iters;
+  u64 stime, iters, i;
   pe g;
   fe f;
 
@@ -27,22 +26,22 @@ void run_bench() {
 
   stime = tsnow();
   pe_clone(&g, &G2);
-  for (u64 i = 0; i < iters; ++i) _ec_jacobi_add1(&g, &g, &G1);
+  for (i = 0; i < iters; ++i) _ec_jacobi_add1(&g, &g, &G1);
   print_res("_ec_jacobi_add1", stime, iters);
 
   pe_clone(&g, &G2);
   stime = tsnow();
-  for (u64 i = 0; i < iters; ++i) _ec_jacobi_add2(&g, &g, &G1);
+  for (i = 0; i < iters; ++i) _ec_jacobi_add2(&g, &g, &G1);
   print_res("_ec_jacobi_add2", stime, iters);
 
   pe_clone(&g, &G2);
   stime = tsnow();
-  for (u64 i = 0; i < iters; ++i) _ec_jacobi_dbl1(&g, &g);
+  for (i = 0; i < iters; ++i) _ec_jacobi_dbl1(&g, &g);
   print_res("_ec_jacobi_dbl1", stime, iters);
 
   pe_clone(&g, &G2);
   stime = tsnow();
-  for (u64 i = 0; i < iters; ++i) _ec_jacobi_dbl2(&g, &g);
+  for (i = 0; i < iters; ++i) _ec_jacobi_dbl2(&g, &g);
   print_res("_ec_jacobi_dbl2", stime, iters);
 
   // ec multiplication
@@ -54,12 +53,12 @@ void run_bench() {
 
   iters = 1000 * 10;
   stime = tsnow();
-  for (u64 i = 0; i < iters; ++i) ec_jacobi_mul(&g, &G1, numbers[i % numSize]);
+  for (i = 0; i < iters; ++i) ec_jacobi_mul(&g, &G1, numbers[i % numSize]);
   print_res("ec_jacobi_mul", stime, iters);
 
   iters = 1000 * 500;
   stime = tsnow();
-  for (u64 i = 0; i < iters; ++i) ec_gtable_mul(&g, numbers[i % numSize]);
+  for (i = 0; i < iters; ++i) ec_gtable_mul(&g, numbers[i % numSize]);
   print_res("ec_gtable_mul", stime, iters);
 
   // affine coordinates
@@ -67,23 +66,23 @@ void run_bench() {
 
   pe_clone(&g, &G2);
   stime = tsnow();
-  for (u64 i = 0; i < iters; ++i) ec_affine_add(&g, &g, &G1);
+  for (i = 0; i < iters; ++i) ec_affine_add(&g, &g, &G1);
   print_res("ec_affine_add", stime, iters);
 
   pe_clone(&g, &G2);
   stime = tsnow();
-  for (u64 i = 0; i < iters; ++i) ec_affine_dbl(&g, &g);
+  for (i = 0; i < iters; ++i) ec_affine_dbl(&g, &g);
   print_res("ec_affine_dbl", stime, iters);
 
   // modular inversion
   iters = 1000 * 100;
 
   stime = tsnow();
-  for (u64 i = 0; i < iters; ++i) _fe_modinv_binpow(f, g.x);
+  for (i = 0; i < iters; ++i) _fe_modinv_binpow(f, g.x);
   print_res("_fe_modinv_binpow", stime, iters);
 
   stime = tsnow();
-  for (u64 i = 0; i < iters; ++i) _fe_modinv_addchn(f, g.x);
+  for (i = 0; i < iters; ++i) _fe_modinv_addchn(f, g.x);
   print_res("_fe_modinv_addchn", stime, iters);
 
   // hash functions
@@ -91,11 +90,11 @@ void run_bench() {
   h160_t h160;
 
   stime = tsnow();
-  for (u64 i = 0; i < iters; ++i) addr33(h160, &g);
+  for (i = 0; i < iters; ++i) addr33(h160, &g);
   print_res("addr33", stime, iters);
 
   stime = tsnow();
-  for (u64 i = 0; i < iters; ++i) addr65(h160, &g);
+  for (i = 0; i < iters; ++i) addr65(h160, &g);
   print_res("addr65", stime, iters);
 }
 
