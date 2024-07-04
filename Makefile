@@ -22,6 +22,5 @@ mul: build
 	cat data.txt | ./ecloop mul -f _check_1.txt -t 4 -a cu
 
 blf: build
-	@rm -rf /tmp/test.blf
-	cat data/btc-puzzles-hash | ./ecloop blf-gen -n 1024 -o /tmp/test.blf
+	rm -rf /tmp/test.blf; cat data/btc-puzzles-hash | ./ecloop blf-gen -n 1024 -o /tmp/test.blf
 	./ecloop add -f /tmp/test.blf -t 8 -r 8000:ffffff

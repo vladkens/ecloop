@@ -1,3 +1,4 @@
+#include <locale.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -33,10 +34,10 @@ bool args_bool(args_t *args, const char *name) {
   return false;
 }
 
-int args_int(args_t *args, const char *name, int def) {
+u64 args_int(args_t *args, const char *name, int def) {
   for (int i = 1; i < args->argc - 1; ++i) {
     if (strcmp(args->argv[i], name) == 0) {
-      return strtoul(args->argv[i + 1], NULL, 10);
+      return strtoull(args->argv[i + 1], NULL, 10);
     }
   }
   return def;
@@ -201,29 +202,15 @@ void blf_add(blf_t *blf, const h160_t hash) {
   u64 a4 = (u64)hash[1] << 32 | hash[2];
   u64 a5 = (u64)hash[3] << 32 | hash[4];
 
-  blf_setbit(blf, a1);
-  blf_setbit(blf, a2);
-  blf_setbit(blf, a3);
-  blf_setbit(blf, a4);
-  blf_setbit(blf, a5);
-
-  blf_setbit(blf, a1 << 32 | a2 >> 32);
-  blf_setbit(blf, a2 << 32 | a3 >> 32);
-  blf_setbit(blf, a3 << 32 | a4 >> 32);
-  blf_setbit(blf, a4 << 32 | a5 >> 32);
-  blf_setbit(blf, a5 << 32 | a1 >> 32);
-
-  blf_setbit(blf, a1 << 16 | a2 >> 48);
-  blf_setbit(blf, a2 << 16 | a3 >> 48);
-  blf_setbit(blf, a3 << 16 | a4 >> 48);
-  blf_setbit(blf, a4 << 16 | a5 >> 48);
-  blf_setbit(blf, a5 << 16 | a1 >> 48);
-
-  blf_setbit(blf, a1 << 48 | a2 >> 16);
-  blf_setbit(blf, a2 << 48 | a3 >> 16);
-  blf_setbit(blf, a3 << 48 | a4 >> 16);
-  blf_setbit(blf, a4 << 48 | a5 >> 16);
-  blf_setbit(blf, a5 << 48 | a1 >> 16);
+  u8 shifts[4] = {0, 48, 24, 16};
+  for (size_t i = 0; i < 4; ++i) {
+    u8 S = shifts[i];
+    blf_setbit(blf, a1 << S | a2 >> S);
+    blf_setbit(blf, a2 << S | a3 >> S);
+    blf_setbit(blf, a3 << S | a4 >> S);
+    blf_setbit(blf, a4 << S | a5 >> S);
+    blf_setbit(blf, a5 << S | a1 >> S);
+  }
 }
 
 bool blf_has(blf_t *blf, const h160_t hash) {
@@ -233,29 +220,15 @@ bool blf_has(blf_t *blf, const h160_t hash) {
   u64 a4 = (u64)hash[1] << 32 | hash[2];
   u64 a5 = (u64)hash[3] << 32 | hash[4];
 
-  if (!blf_getbit(blf, a1)) return false;
-  if (!blf_getbit(blf, a2)) return false;
-  if (!blf_getbit(blf, a3)) return false;
-  if (!blf_getbit(blf, a4)) return false;
-  if (!blf_getbit(blf, a5)) return false;
-
-  if (!blf_getbit(blf, a1 << 32 | a2 >> 32)) return false;
-  if (!blf_getbit(blf, a2 << 32 | a3 >> 32)) return false;
-  if (!blf_getbit(blf, a3 << 32 | a4 >> 32)) return false;
-  if (!blf_getbit(blf, a4 << 32 | a5 >> 32)) return false;
-  if (!blf_getbit(blf, a5 << 32 | a1 >> 32)) return false;
-
-  if (!blf_getbit(blf, a1 << 16 | a2 >> 48)) return false;
-  if (!blf_getbit(blf, a2 << 16 | a3 >> 48)) return false;
-  if (!blf_getbit(blf, a3 << 16 | a4 >> 48)) return false;
-  if (!blf_getbit(blf, a4 << 16 | a5 >> 48)) return false;
-  if (!blf_getbit(blf, a5 << 16 | a1 >> 48)) return false;
-
-  if (!blf_getbit(blf, a1 << 48 | a2 >> 16)) return false;
-  if (!blf_getbit(blf, a2 << 48 | a3 >> 16)) return false;
-  if (!blf_getbit(blf, a3 << 48 | a4 >> 16)) return false;
-  if (!blf_getbit(blf, a4 << 48 | a5 >> 16)) return false;
-  if (!blf_getbit(blf, a5 << 48 | a1 >> 16)) return false;
+  u8 shifts[4] = {0, 48, 24, 16};
+  for (size_t i = 0; i < 4; ++i) {
+    u8 S = shifts[i];
+    if (!blf_getbit(blf, a1 << S | a2 >> S)) return false;
+    if (!blf_getbit(blf, a2 << S | a3 >> S)) return false;
+    if (!blf_getbit(blf, a3 << S | a4 >> S)) return false;
+    if (!blf_getbit(blf, a4 << S | a5 >> S)) return false;
+    if (!blf_getbit(blf, a5 << S | a1 >> S)) return false;
+  }
 
   return true;
 }
@@ -292,10 +265,11 @@ void blf_gen(args_t *args) {
     exit(1);
   }
 
-  // https://hur.st/bloomfilter/
+  // https://hur.st/bloomfilter/?n=500M&p=1000000&m=&k=20
   double p = 1.0 / 1000000.0;
   u64 m = (u64)(n * log(p) / log(1.0 / pow(2.0, log(2.0))));
-  printf("creating bloom filter: n = %llu; p = %f; m = %llu\n", n, p, m);
+  double size_mb = (double)m / 8 / 1024 / 1024;
+  printf("creating bloom filter: n = %'llu | p = %f | m = %'llu (%'.1f MB)\n", n, p, m, size_mb);
 
   u64 size = (m + 63) / 64;
   u64 *bits = calloc(size, sizeof(u64));
@@ -313,10 +287,9 @@ void blf_gen(args_t *args) {
 
     count += 1;
     blf_add(&blf, hash);
-    // printf("verify: %s %d\n", line, blf_has(&blf, hash));
   }
 
-  printf("added %llu hashes\n", count);
+  printf("added %'llu items; saving to %s\n", count, outfile);
 
   FILE *file = fopen(outfile, "wb");
   if (file == NULL) {
@@ -432,7 +405,7 @@ void ctx_print_status(ctx_t *ctx) {
   pthread_mutex_lock(&ctx->lock);
   double dt = (tsnow() - ctx->stime) / 1000.0;
   double it = ctx->k_checked / dt / 1000000;
-  printf("\033[F\n%.2fs ~ %.2fM it/s ~ %zu / %zu", dt, it, ctx->k_found, ctx->k_checked);
+  printf("\033[F\n%.2fs ~ %.2fM it/s ~ %'zu / %'zu", dt, it, ctx->k_found, ctx->k_checked);
   pthread_mutex_unlock(&ctx->lock);
 }
 
@@ -752,7 +725,7 @@ void init(ctx_t *ctx, args_t *args) {
   printf("threads: %zu ~ addr33: %d ~ addr65: %d | filter: ", //
          ctx->threads_count, ctx->check_addr33, ctx->check_addr65);
 
-  if (ctx->to_find_hashes != NULL) printf("list (%zu)\n", ctx->to_find_count);
+  if (ctx->to_find_hashes != NULL) printf("list (%'zu)\n", ctx->to_find_count);
   else printf("bloom\n");
 
   if (ctx->cmd == CMD_ADD) {
@@ -764,6 +737,9 @@ void init(ctx_t *ctx, args_t *args) {
 }
 
 int main(int argc, const char **argv) {
+  // https://stackoverflow.com/a/11695246
+  setlocale(LC_NUMERIC, ""); // for comma separated numbers
+
   args_t args = {argc, argv};
 
   ctx_t ctx;
