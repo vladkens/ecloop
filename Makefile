@@ -14,6 +14,7 @@ build: clean
 	@clang $(CC_FLAGS) main.c -o ecloop
 
 # -----------------------------------------------------------------------------
+n = 1024
 
 add: build
 	./ecloop add -f data/btc-puzzles-hash -t 4 -r 8000:ffffff
@@ -22,5 +23,5 @@ mul: build
 	cat data.txt | ./ecloop mul -f _check_1.txt -t 4 -a cu
 
 blf: build
-	rm -rf /tmp/test.blf; cat data/btc-puzzles-hash | ./ecloop blf-gen -n 1024 -o /tmp/test.blf
-	./ecloop add -f /tmp/test.blf -t 8 -r 8000:ffffff
+	rm -rf /tmp/test.blf; cat data/btc-puzzles-hash | ./ecloop blf-gen -n $(n) -o /tmp/test.blf
+	./ecloop add -f /tmp/test.blf -t 1 -r 8000:ffffff -q -o /dev/null

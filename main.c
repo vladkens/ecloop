@@ -188,11 +188,13 @@ typedef struct blf_t {
 } blf_t;
 
 static inline void blf_setbit(blf_t *blf, size_t idx) {
-  blf->bits[idx % blf->size] |= (u64)1 << (idx % 64);
+  idx = idx % (blf->size * 64);
+  blf->bits[idx / 64] |= (u64)1 << (idx % 64);
 }
 
 static inline bool blf_getbit(blf_t *blf, u64 idx) {
-  return (blf->bits[idx % blf->size] & ((u64)1 << (idx % 64))) != 0;
+  idx = idx % (blf->size * 64);
+  return (blf->bits[idx / 64] & ((u64)1 << (idx % 64))) != 0;
 }
 
 void blf_add(blf_t *blf, const h160_t hash) {
@@ -405,7 +407,8 @@ void ctx_print_status(ctx_t *ctx) {
   pthread_mutex_lock(&ctx->lock);
   double dt = (tsnow() - ctx->stime) / 1000.0;
   double it = ctx->k_checked / dt / 1000000;
-  printf("\033[F\n%.2fs ~ %.2fM it/s ~ %'zu / %'zu", dt, it, ctx->k_found, ctx->k_checked);
+  printf("\r%.2fs ~ %.2fM it/s ~ %'zu / %'zu", dt, it, ctx->k_found, ctx->k_checked);
+  fflush(stdout);
   pthread_mutex_unlock(&ctx->lock);
 }
 
@@ -413,8 +416,8 @@ void ctx_write_found(ctx_t *ctx, const char *label, const h160_t hash, const fe 
   pthread_mutex_lock(&ctx->lock);
 
   if (!ctx->quiet) {
-    printf("\033[F\n%s: %08x%08x%08x%08x%08x <- %016llx%016llx%016llx%016llx\n", //
-           label, hash[0], hash[1], hash[2], hash[3], hash[4],                   //
+    printf("\r%s: %08x%08x%08x%08x%08x <- %016llx%016llx%016llx%016llx\n", //
+           label, hash[0], hash[1], hash[2], hash[3], hash[4],             //
            pk[3], pk[2], pk[1], pk[0]);
   }
 

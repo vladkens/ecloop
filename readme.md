@@ -107,6 +107,9 @@ Should print output like:
 
 This project is written to learn the math over elliptic curves in cryptocurrencies. Functionality as a search for Bitcoin Puzzles is added as a real-world use case.
 
+## Cudos to
+- [sharpden](https://github.com/sharpden)
+
 ## See also
 
 - [ryancdotorg/brainflayer](https://github.com/ryancdotorg/brainflayer)
