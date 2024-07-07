@@ -16,6 +16,7 @@
 #define VERSION "0.2.1"
 #define MAX_JOB_SIZE 1024 * 1024 * 2
 #define GROUP_INV_SIZE 1024
+#define MAX_LINE_SIZE 128
 
 typedef char hex40[41]; // rmd160 hex string
 typedef char hex64[65]; // sha256 hex string
@@ -82,8 +83,7 @@ void arg_search_range(args_t *args, fe range_s, fe range_e) {
 // MARK: hex64 queue
 
 typedef struct queue_item_t {
-  size_t size;
-  hex64 *data;
+  void *data_ptr;
   struct queue_item_t *next;
 } queue_item_t;
 
@@ -96,8 +96,6 @@ typedef struct queue_t {
   pthread_mutex_t lock;
   pthread_cond_t cond_put;
   pthread_cond_t cond_get;
-  size_t total_put;
-  size_t total_get;
 } queue_t;
 
 void queue_init(queue_t *q, size_t capacity) {
@@ -106,8 +104,6 @@ void queue_init(queue_t *q, size_t capacity) {
   q->done = false;
   q->head = NULL;
   q->tail = NULL;
-  q->total_put = 0;
-  q->total_get = 0;
   pthread_mutex_init(&q->lock, NULL);
   pthread_cond_init(&q->cond_put, NULL);
   pthread_cond_init(&q->cond_get, NULL);
@@ -120,7 +116,7 @@ void queue_done(queue_t *q) {
   pthread_mutex_unlock(&q->lock);
 }
 
-void queue_put(queue_t *q, const hex64 data[], size_t size) {
+void queue_put(queue_t *q, void *data_ptr) {
   pthread_mutex_lock(&q->lock);
   if (q->done) {
     pthread_mutex_unlock(&q->lock);
@@ -128,14 +124,11 @@ void queue_put(queue_t *q, const hex64 data[], size_t size) {
   }
 
   while (q->size == q->capacity) {
-    // printf("Waiting for put ~ %zu ~ %zu\n", q->total_put, q->total_get);
     pthread_cond_wait(&q->cond_put, &q->lock);
   }
 
   queue_item_t *item = malloc(sizeof(queue_item_t));
-  item->size = size;
-  item->data = malloc(size * sizeof(hex64));
-  memcpy(item->data, data, size * sizeof(hex64));
+  item->data_ptr = data_ptr;
   item->next = NULL;
 
   if (q->tail != NULL) q->tail->next = item;
@@ -143,41 +136,33 @@ void queue_put(queue_t *q, const hex64 data[], size_t size) {
 
   q->tail = item;
   q->size += 1;
-  q->total_put += 1;
 
   pthread_cond_signal(&q->cond_get);
   pthread_mutex_unlock(&q->lock);
 }
 
-void queue_get(queue_t *q, hex64 **data, size_t *size) {
+void *queue_get(queue_t *q) {
   pthread_mutex_lock(&q->lock);
   while (q->size == 0 && !q->done) {
-    // printf("Waiting for get ~ %zu ~ %zu\n", q->total_put, q->total_get);
     pthread_cond_wait(&q->cond_get, &q->lock);
   }
 
-  free(*data);
-  *data = NULL;
-  *size = 0;
-
   if (q->size == 0) {
     pthread_mutex_unlock(&q->lock);
-    return;
+    return NULL;
   }
 
   queue_item_t *item = q->head;
   q->head = item->next;
   if (!q->head) q->tail = NULL;
 
-  *size = item->size;
-  *data = item->data;
+  void *data_ptr = item->data_ptr;
   free(item);
-
   q->size -= 1;
-  q->total_get += 1;
 
   pthread_cond_signal(&q->cond_put);
   pthread_mutex_unlock(&q->lock);
+  return data_ptr;
 }
 
 // MARK: bloom filter
@@ -344,6 +329,7 @@ typedef struct ctx_t {
 
   // cmd mul
   queue_t queue;
+  bool raw_text;
 } ctx_t;
 
 void load_filter(ctx_t *ctx, const char *path) {
@@ -582,38 +568,73 @@ int cmd_add(ctx_t *ctx) {
 
 // MARK: CMD_MUL
 
+typedef struct cmd_mul_job_t {
+  size_t count;
+  char lines[GROUP_INV_SIZE][MAX_LINE_SIZE];
+} cmd_mul_job_t;
+
 void *cmd_mul_worker(void *arg) {
   ctx_t *ctx = (ctx_t *)arg;
 
-  hex64 *data = NULL;
-  size_t size;
+  // sha256 routine
+  const u8 sha_tail = 9; // 9 = 1 byte 0x80 + 8 byte bitlen
+  u8 msg[(MAX_LINE_SIZE + 63 + sha_tail) / 64 * 64] = {0};
+  u32 res[8] = {0};
 
   fe pk[GROUP_INV_SIZE];
   pe cp[GROUP_INV_SIZE];
+  cmd_mul_job_t *job = NULL;
 
   while (true) {
-    queue_get(&ctx->queue, &data, &size);
-    if (size == 0) break;
+    if (job != NULL) free(job);
+    job = queue_get(&ctx->queue);
+    if (job == NULL) break;
 
     // parse private keys from hex string
-    for (size_t i = 0; i < size; ++i) fe_from_hex(pk[i], data[i]);
+    if (!ctx->raw_text) {
+      for (size_t i = 0; i < job->count; ++i) fe_from_hex(pk[i], job->lines[i]);
+    } else {
+      for (size_t i = 0; i < job->count; ++i) {
+        size_t len = strlen(job->lines[i]);
+        size_t msg_size = (len + 63 + sha_tail) / 64 * 64;
+
+        // caclulate sha256 hash
+        size_t bitlen = len * 8;
+        memcpy(msg, job->lines[i], len);
+        memset(msg + len, 0, msg_size - len);
+        msg[len] = 0x80;
+        for (int j = 0; j < 8; j++) msg[msg_size - 1 - j] = bitlen >> (j * 8);
+        sha256_final(res, (u8 *)msg, msg_size);
+
+        // debug log (do with `-t 1`)
+        // printf("\n%zu %s\n", len, job->lines[i]);
+        // for (int i = 0; i < msg_size; i++) printf("%02x%s", msg[i], i % 16 == 15 ? "\n" : " ");
+        // for (int i = 0; i < 8; i++) printf("%08x%s", res[i], i % 8 == 7 ? "\n" : "");
+
+        pk[i][0] = (u64)res[6] << 32 | res[7];
+        pk[i][1] = (u64)res[4] << 32 | res[5];
+        pk[i][2] = (u64)res[2] << 32 | res[3];
+        pk[i][3] = (u64)res[0] << 32 | res[1];
+      }
+    }
 
     // compute public keys in batch
-    for (size_t i = 0; i < size; ++i) ec_gtable_mul(&cp[i], pk[i]);
-    ec_jacobi_grprdc(cp, size);
+    for (size_t i = 0; i < job->count; ++i) ec_gtable_mul(&cp[i], pk[i]);
+    ec_jacobi_grprdc(cp, job->count);
 
     size_t found = 0;
-    for (size_t i = 0; i < size; ++i) {
+    for (size_t i = 0; i < job->count; ++i) {
       if (ctx_check_found(ctx, &cp[i], pk[i])) found += 1;
     }
 
     pthread_mutex_lock(&ctx->lock);
-    ctx->k_checked += size;
+    ctx->k_checked += job->count;
     ctx->k_found += found;
     pthread_mutex_unlock(&ctx->lock);
     ctx_print_status(ctx);
   }
 
+  if (job != NULL) free(job);
   return NULL;
 }
 
@@ -624,22 +645,26 @@ int cmd_mul(ctx_t *ctx) {
     pthread_create(&ctx->threads[i], NULL, cmd_mul_worker, ctx);
   }
 
-  hex64 data[GROUP_INV_SIZE];
-  size_t count = 0;
+  cmd_mul_job_t *job = calloc(1, sizeof(cmd_mul_job_t));
+  char line[MAX_LINE_SIZE];
 
-  hex64 line;
   while (fgets(line, sizeof(line), stdin) != NULL) {
-    if (strlen(line) != sizeof(line) - 1) continue;
+    size_t len = strlen(line);
+    if (len && line[len - 1] == '\n') line[--len] = '\0';
+    if (len && line[len - 1] == '\r') line[--len] = '\0';
+    if (len == 0) continue;
 
-    strcpy(data[count++ % GROUP_INV_SIZE], line);
-
-    if (count == GROUP_INV_SIZE) {
-      queue_put(&ctx->queue, data, count);
-      count = 0;
+    strcpy(job->lines[job->count++], line);
+    if (job->count == GROUP_INV_SIZE) {
+      queue_put(&ctx->queue, job);
+      job = calloc(1, sizeof(cmd_mul_job_t));
     }
   }
 
-  if (count > 0) queue_put(&ctx->queue, data, count);
+  if (job->count > 0 && job->count != GROUP_INV_SIZE) {
+    queue_put(&ctx->queue, job);
+  }
+
   queue_done(&ctx->queue);
 
   for (size_t i = 0; i < ctx->threads_count; ++i) {
@@ -734,6 +759,10 @@ void init(ctx_t *ctx, args_t *args) {
   if (ctx->cmd == CMD_ADD) {
     fe_print("range_s", ctx->range_s);
     fe_print("range_e", ctx->range_e);
+  }
+
+  if (ctx->cmd == CMD_MUL) {
+    ctx->raw_text = args_bool(args, "-raw");
   }
 
   printf("----------------------------------------\n");

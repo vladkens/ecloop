@@ -57,10 +57,10 @@ ecloop add -f data/btc-puzzles-hash -t 4 -r 800000:ffffff -o /tmp/found.txt
 
 ### Example 2: Check given privkeys list (multiply)
 
-`echo privkeys.txt` – source of HEX encoded priv keys to search (can be file or generator program). `-f` – hash160 to search as bloom filter (can have false positive results, but has a much smaller size; eg. all BTC addresses ever used have size ~6GB). `-a` – what type of hash160 to search (`c` – compressed, `u` – uncopressed, `cu` check both). `-t` use 8 threads.
+`cat privkeys.txt` – source of HEX encoded priv keys to search (can be file or generator program). `-f` – hash160 to search as bloom filter (can have false positive results, but has a much smaller size; eg. all BTC addresses ever used have size ~6GB). `-a` – what type of hash160 to search (`c` – compressed, `u` – uncopressed, `cu` check both). `-t` use 8 threads.
 
 ```sh
-echo privkeys.txt | ecloop mul -f data/btc-puzzles.blf -a cu -t 4
+cat privkeys.txt | ecloop mul -f data/btc-puzzles.blf -a cu -t 4
 ```
 
 ### Example 3: Generating bloom filter
