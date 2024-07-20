@@ -1,7 +1,7 @@
 CC_FLAGS ?= -O3
 
 ifeq ($(shell uname -m),x86_64)
-	CC_FLAGS += -march=native
+	CC_FLAGS += -march=native -pthread -lpthread
 endif
 
 default: build
