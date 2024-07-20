@@ -63,6 +63,12 @@ ecloop add -f data/btc-puzzles-hash -t 4 -r 800000:ffffff -o /tmp/found.txt
 cat privkeys.txt | ecloop mul -f data/btc-puzzles.blf -a cu -t 4
 ```
 
+`ecloop` can also take a raw word list and automatically hash it with sha256. Use `-raw` flag to it.
+
+```sh
+cat wordlist.txt | ecloop mul -f data/btc-puzzles.blf -a cu -t 4 -raw
+```
+
 ### Example 3: Generating bloom filter
 
 `cat` reads the list of hex-encoded hash160 values from a file. `-n` specifies the number of entries for the Bloom filter (count of hashes). `-o` defines the output where to write filter (`.blf` extension requried).
@@ -77,6 +83,8 @@ Then created bloom filter can be used in `ecloop` as filter:
 ```sh
 ecloop add -f /tmp/test.blf -t 4 -r 8000:ffffff
 ```
+
+Note: Bloom filter works with both `add` and `mul` commands.
 
 ## Benchmark
 

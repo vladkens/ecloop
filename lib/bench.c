@@ -2,7 +2,7 @@
 
 #include "addr.c"
 #include "ecc.c"
-#include "util.c"
+#include "utils.c"
 
 void print_res(char *label, u64 stime, u64 iters) {
   double dt = MAX((tsnow() - stime), 1) / 1000.0;

@@ -20,7 +20,7 @@ add: build
 	./ecloop add -f data/btc-puzzles-hash -t 4 -r 8000:ffffff
 
 mul: build
-	cat data.txt | ./ecloop mul -f _check_1.txt -t 4 -a cu
+	cat misc/data.txt | ./ecloop mul -f misc/wd_filter.txt -t 4 -a cu -q -o /dev/null
 
 blf: build
 	rm -rf /tmp/test.blf; cat data/btc-puzzles-hash | ./ecloop blf-gen -n $(n) -o /tmp/test.blf
