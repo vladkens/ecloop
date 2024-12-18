@@ -22,8 +22,6 @@ git clone https://github.com/vladkens/ecloop.git && cd ecloop
 make build
 ```
 
-Note: Build has been tested with `clang`. It may work with `gcc14`, but this has not been thoroughly tested. If anyone knows how to get this to work with gcc14 or earlier – I'd be happy to get a PR.
-
 ## Usage
 
 ```text
@@ -110,6 +108,21 @@ Should print output like:
               addr33: 4.95M it/s ~ 1.01s
               addr65: 4.41M it/s ~ 1.14s
 ```
+
+## Build on Windows with WSL
+
+I just leave here all steps I do to run `ecloop` on Windows.
+
+1. Open PowerShell
+2. `wsl --install`
+3. Restart Windows
+4. `wsl --install Ubuntu` (not sure it required, Ubuntu should be installed by default and this command hung when I tried it, so I continued in new tab)
+5. `wsl -d Ubuntu`
+6. `apt update && apt install build-essential git`
+7. `git clone https://github.com/vladkens/ecloop.git && cd ecloop`
+8. `make build`
+
+If no errors appear, `ecloop` has been compiled successfully and is ready to use. For example, you can run a benchmark with: `./ecloop bench`.
 
 ## Disclaimer
 
