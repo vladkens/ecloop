@@ -1,5 +1,6 @@
 .DS_Store
-internal/
 misc/
+misc-*/
 *.out
 ecloop
+_*.txt

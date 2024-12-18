@@ -14,6 +14,34 @@ typedef unsigned long long u64;
 typedef unsigned int u32;
 typedef unsigned char u8;
 
+// https://clang.llvm.org/docs/LanguageExtensions.html#:~:text=__builtin_addcll
+// https://gcc.gnu.org/onlinedocs/gcc/Integer-Overflow-Builtins.html#:~:text=__builtin_uaddll_overflow
+
+#if !defined(__clang__) && defined(__GNUC__) && !defined(__builtin_addcll)
+u64 __builtin_addcll(u64 x, u64 y, u64 carryin, u64 *carryout) {
+  u64 rs;
+  bool overflow1 = __builtin_uaddll_overflow(x, y, &rs);
+  bool overflow2 = __builtin_uaddll_overflow(rs, carryin, &rs);
+
+  *carryout = (overflow1 || overflow2) ? 1 : 0;
+  return rs;
+}
+#endif
+
+// https://clang.llvm.org/docs/LanguageExtensions.html#:~:text=__builtin_subcll
+// https://gcc.gnu.org/onlinedocs/gcc/Integer-Overflow-Builtins.html#:~:text=__builtin_usubll_overflow
+
+#if !defined(__clang__) && defined(__GNUC__) && !defined(__builtin_subcll)
+u64 __builtin_subcll(u64 x, u64 y, u64 carryin, u64 *carryout) {
+  u64 rs;
+  bool underflow1 = __builtin_usubll_overflow(x, y, &rs);
+  bool underflow2 = __builtin_usubll_overflow(rs, carryin, &rs);
+
+  *carryout = (underflow1 || underflow2) ? 1 : 0;
+  return rs;
+}
+#endif
+
 INLINE u64 umul128(const u64 a, const u64 b, u64 *hi) {
   // https://stackoverflow.com/a/50958815
   // https://botan.randombit.net/doxygen/mul128_8h_source.html

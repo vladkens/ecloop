@@ -1,4 +1,5 @@
 #include <locale.h>
+#include <stdbool.h>
 #include <string.h>
 
 #include "lib/addr.c"
@@ -87,11 +88,12 @@ void load_filter(ctx_t *ctx, const char *filepath) {
   fclose(file);
 }
 
-void ctx_print_status(ctx_t *ctx) {
+void ctx_print_status(ctx_t *ctx, bool final) {
   pthread_mutex_lock(&ctx->lock);
   double dt = (tsnow() - ctx->stime) / 1000.0;
   double it = ctx->k_checked / dt / 1000000;
   printf("\r%.2fs ~ %.2fM it/s ~ %'zu / %'zu", dt, it, ctx->k_found, ctx->k_checked);
+  if (final) printf("\n");
   fflush(stdout);
   pthread_mutex_unlock(&ctx->lock);
 }
@@ -133,7 +135,7 @@ bool ctx_check_found(ctx_t *ctx, const pe *cp, const fe pk) {
     addr33(hash, cp);
     if (ctx_check_hash(ctx, hash)) {
       ctx_write_found(ctx, "addr33", hash, pk);
-      ctx_print_status(ctx);
+      ctx_print_status(ctx, false);
       found = true;
     }
   }
@@ -142,7 +144,7 @@ bool ctx_check_found(ctx_t *ctx, const pe *cp, const fe pk) {
     addr65(hash, cp);
     if (ctx_check_hash(ctx, hash)) {
       ctx_write_found(ctx, "addr65", hash, pk);
-      ctx_print_status(ctx);
+      ctx_print_status(ctx, false);
       found = true;
     }
   }
@@ -232,7 +234,7 @@ void *cmd_add_worker(void *arg) {
     ctx->k_checked += ctx->job_size;
     ctx->k_found += found;
     pthread_mutex_unlock(&ctx->lock);
-    ctx_print_status(ctx);
+    ctx_print_status(ctx, false);
   }
 
   return NULL;
@@ -259,8 +261,7 @@ int cmd_add(ctx_t *ctx) {
     pthread_join(ctx->threads[i], NULL);
   }
 
-  ctx_print_status(ctx);
-  printf("\n");
+  ctx_print_status(ctx, true);
   return 0;
 }
 
@@ -328,7 +329,7 @@ void *cmd_mul_worker(void *arg) {
     ctx->k_checked += job->count;
     ctx->k_found += found;
     pthread_mutex_unlock(&ctx->lock);
-    ctx_print_status(ctx);
+    ctx_print_status(ctx, false);
   }
 
   if (job != NULL) free(job);
@@ -368,8 +369,7 @@ int cmd_mul(ctx_t *ctx) {
     pthread_join(ctx->threads[i], NULL);
   }
 
-  ctx_print_status(ctx);
-  printf("\n");
+  ctx_print_status(ctx, true);
   return 0;
 }
 
