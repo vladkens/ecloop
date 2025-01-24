@@ -25,7 +25,7 @@ make build
 ## Usage
 
 ```text
-Usage: ecloop <cmd> [-t <threads>] [-f <filepath>] [-a <addr_type>] [-r <range>]
+Usage: ./ecloop <cmd> [-t <threads>] [-f <filepath>] [-a <addr_type>] [-r <range>]
 
 Compute commands:
   add             - search in given range with batch addition
@@ -50,7 +50,7 @@ Other commands:
 `-f` is filter file with hash160 to search. Can be list of hex encoded hashes (one per line) or bloom fitler (must have `.blf` extension). `-t` use 4 threads. `r` – start:end of search range. `-o` file where found keys should be saved (if not provided `stdout` fill be used). No `-a` option provided, so `c` (compressed) hash160 will be checked.
 
 ```sh
-ecloop add -f data/btc-puzzles-hash -t 4 -r 800000:ffffff -o /tmp/found.txt
+./ecloop add -f data/btc-puzzles-hash -t 4 -r 800000:ffffff -o /tmp/found.txt
 ```
 
 ### Example 2: Check given privkeys list (multiply)
@@ -58,13 +58,13 @@ ecloop add -f data/btc-puzzles-hash -t 4 -r 800000:ffffff -o /tmp/found.txt
 `cat privkeys.txt` – source of HEX encoded priv keys to search (can be file or generator program). `-f` – hash160 to search as bloom filter (can have false positive results, but has a much smaller size; eg. all BTC addresses ever used have size ~6GB). `-a` – what type of hash160 to search (`c` – compressed, `u` – uncopressed, `cu` check both). `-t` use 8 threads.
 
 ```sh
-cat privkeys.txt | ecloop mul -f data/btc-puzzles.blf -a cu -t 4
+cat privkeys.txt | ./ecloop mul -f data/btc-puzzles.blf -a cu -t 4
 ```
 
 `ecloop` can also take a raw word list and automatically hash it with sha256. Use `-raw` flag to it.
 
 ```sh
-cat wordlist.txt | ecloop mul -f data/btc-puzzles.blf -a cu -t 4 -raw
+cat wordlist.txt | ./ecloop mul -f data/btc-puzzles.blf -a cu -t 4 -raw
 ```
 
 ### Example 3: Generating bloom filter
@@ -74,12 +74,12 @@ cat wordlist.txt | ecloop mul -f data/btc-puzzles.blf -a cu -t 4 -raw
 Bloom filter uses p = 0.000001 (1 in 1,000,000 false positive). You can adjusting this option by playing with `n`. See [Bloom Filter Calculator](https://hur.st/bloomfilter/?n=1024&p=0.000001&m=&k=20). List of all addressed can be found [here](https://bitcointalk.org/index.php?topic=5265993.0). 
 
 ```sh
-cat data/btc-puzzles-hash | ecloop blf-gen -n 1024 -o /tmp/test.blf
+cat data/btc-puzzles-hash | ./ecloop blf-gen -n 1024 -o /tmp/test.blf
 ```
 
 Then created bloom filter can be used in `ecloop` as filter:
 ```sh
-ecloop add -f /tmp/test.blf -t 4 -r 8000:ffffff
+./ecloop add -f /tmp/test.blf -t 4 -r 8000:ffffff
 ```
 
 Note: Bloom filter works with both `add` and `mul` commands.
@@ -89,7 +89,7 @@ Note: Bloom filter works with both `add` and `mul` commands.
 Get performance of different function for single thread:
 
 ```sh
-ecloop bench
+./ecloop bench
 ```
 
 Should print output like:
