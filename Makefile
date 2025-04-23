@@ -12,15 +12,18 @@ clean:
 build: clean
 	cc $(CC_FLAGS) main.c -o ecloop
 
+bench: build
+	./ecloop bench
+
 # -----------------------------------------------------------------------------
 
 n = 1024
 
 add: build
-	./ecloop add -f data/btc-puzzles-hash -t 4 -r 8000:ffffff
+	./ecloop add -f data/btc-puzzles-hash -r 8000:ffffff
 
 mul: build
-	cat misc/bw_priv.txt | ./ecloop mul -f misc/bw_addr.txt -t 4 -a cu -q -o /dev/null
+	cat misc/bw_priv.txt | ./ecloop mul -f misc/bw_addr.txt -a cu -q -o /dev/null
 
 blf: build
 	rm -rf /tmp/test.blf; cat data/btc-puzzles-hash | ./ecloop blf-gen -n $(n) -o /tmp/test.blf

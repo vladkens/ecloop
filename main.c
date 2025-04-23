@@ -44,6 +44,15 @@ typedef struct ctx_t {
   bool raw_text;
 } ctx_t;
 
+int get_cpu_count() {
+  int cpu_count = sysconf(_SC_NPROCESSORS_ONLN);
+  if (cpu_count == -1) {
+    perror("sysconf: unable to get CPU count, defaulting to 1");
+    return 1;
+  }
+  return cpu_count;
+}
+
 void load_filter(ctx_t *ctx, const char *filepath) {
   if (!filepath) {
     fprintf(stderr, "missing filter file\n");
@@ -467,7 +476,8 @@ void init(ctx_t *ctx, args_t *args) {
   }
 
   pthread_mutex_init(&ctx->lock, NULL);
-  ctx->threads_count = MIN(MAX(args_int(args, "-t", 1), 1), 128);
+  int cpus = get_cpu_count();
+  ctx->threads_count = MIN(MAX(args_int(args, "-t", cpus), 1), 128);
   ctx->threads = malloc(ctx->threads_count * sizeof(pthread_t));
   ctx->k_checked = 0;
   ctx->k_found = 0;

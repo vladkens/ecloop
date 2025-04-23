@@ -1,9 +1,14 @@
 {
+  "[c]": {
+    "editor.defaultFormatter": "xaver.clang-format"
+  },
+  "[json]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "editor.formatOnSave": true,
   "files.exclude": {
     "a.out": true,
-    "ecloop": true,
+    "ecloop": true
   },
-  "search.exclude": {
-    "temp.txt": true
-  }
+  "prettier.requireConfig": false
 }
