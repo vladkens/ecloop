@@ -25,7 +25,7 @@ def check_add(hosts: list[str]):
 
     for host in hosts:
         print(f">>> running cmd=add {host}... ", end="")
-        out, elapsed = run(["make", "check-remote", f"host={host}", "cmd=mul"])
+        out, elapsed = run(["make", "remote", f"host={host}", "cmd=mul"])
         out = parse_final(out)
         addr33 = set([x.strip() for x in out.split("\n") if x.startswith("addr33:")])
         addr65 = set([x.strip() for x in out.split("\n") if x.startswith("addr65:")])
@@ -45,7 +45,7 @@ def check_mul(hosts: list[str]):
 
     for host in hosts:
         print(f">>> running cmd=mul {host}... ", end="")
-        out, elapsed = run(["make", "check-remote", f"host={host}", "cmd=mul"])
+        out, elapsed = run(["make", "remote", f"host={host}", "cmd=mul"])
         out = parse_final(out)
         if ref_out == out:
             print(f"ok ~ {elapsed:.2f}s")
@@ -61,7 +61,7 @@ def check_blf(hosts: list[str]):
 
     for host in hosts:
         print(f">>> running cmd=blf {host}... ", end="")
-        out, elapsed = run(["make", "check-remote", f"host={host}", "cmd=blf"])
+        out, elapsed = run(["make", "remote", f"host={host}", "cmd=blf"])
         out = parse_final(out)
         if ref_out == out:
             print(f"ok ~ {elapsed}s")

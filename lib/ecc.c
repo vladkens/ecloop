@@ -1,4 +1,5 @@
 #pragma once
+#include <assert.h>
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -51,7 +52,7 @@ INLINE u64 umul128(const u64 a, const u64 b, u64 *hi) {
 }
 
 // MARK: Field element
-typedef u64 fe[4]; // (256bit as 4x64bit)
+typedef u64 fe[4]; // 256bit as 4x64bit (a3 a2 a1 a0)
 
 // prime field P = 2^256 - 2^32 - 977
 static const fe P = {
@@ -70,6 +71,13 @@ INLINE void fe_clone(fe r, const fe a) { memcpy(r, a, sizeof(fe)); }
 INLINE void fe_set64(fe r, const u64 a) {
   memset(r, 0, sizeof(fe));
   r[0] = a;
+}
+
+size_t fe_bitlen(const fe a) {
+  for (int i = 3; i >= 0; --i) {
+    if (a[i]) return 64 * i + (64 - __builtin_clzll(a[i]));
+  }
+  return 0;
 }
 
 void fe_add64(fe r, const u64 a) {
@@ -287,7 +295,32 @@ void fe_modsqr(fe r, const fe a) {
   if (fe_cmp(r, P) >= 0) fe_modsub(r, r, P);
 }
 
-INLINE void fe_shiftr(fe r, u8 n) {
+INLINE void fe_shiftl(fe r, const u8 n) {
+  if (n == 0) return;
+
+  u64 s = n / 64;
+  u64 rem = n % 64;
+
+  for (int i = 3; i >= 0; --i) {
+    if (i >= s) {
+      r[i] = r[i - s];
+    } else {
+      r[i] = 0;
+    }
+  }
+
+  if (rem == 0) return;
+
+  u128 carry = 0;
+  for (int i = 0; i < 4; ++i) {
+    u128 val = ((u128)r[i]) << rem;
+    r[i] = (u64)(val | carry);
+    carry = val >> 64;
+  }
+}
+
+INLINE void fe_shiftr64(fe r, const u8 n) {
+  assert(n < 64);
   r[0] = (r[0] >> n) | (r[1] << (64 - n));
   r[1] = (r[1] >> n) | (r[2] << (64 - n));
   r[2] = (r[2] >> n) | (r[3] << (64 - n));
@@ -305,7 +338,7 @@ void _fe_modinv_binpow(fe r, const fe a) {
   while (p[0] || p[1] || p[2] || p[3]) {     // p > 0
     if ((a[0] & 1) != 0) fe_modmul(q, q, t); // when odd
     fe_modsqr(t, t);
-    fe_shiftr(p, 1);
+    fe_shiftr64(p, 1);
   }
 
   fe_clone(r, q);
@@ -529,27 +562,28 @@ void _ec_jacobi_add1(pe *r, const pe *p, const pe *q) {
   // y3 = u * (v^2 * v2 - a) - v^3 * u2
   // z3 = v^3 * w
   fe u2, v2, u, v, w, a, vs, vc;
-  fe_modmul(u2, p->y, q->z); // u2 = py * qz
-  fe_modmul(v2, p->x, q->z); // v2 = px * qz
-  fe_modmul(u, q->y, p->z);  // u1 = qy * pz
-  fe_modmul(v, q->x, p->z);  // v1 = qx * pz
-  fe_modmul(w, p->z, q->z);  // w = pz * qz
-  fe_modsub(u, u, u2);       // u = u1 - u2
-  fe_modsub(v, v, v2);       // v = v1 - v2
-  fe_modsqr(vs, v);          // v^2
-  fe_modmul(vc, vs, v);      // v^3
-  fe_modmul(vs, vs, v2);     // v^2 * v2
-  fe_modmul(r->z, vc, w);    // z3 = v^3 * w
-  fe_modsqr(a, u);           // u^2
-  fe_modmul(a, a, w);        // u^2 * w
-  fe_modadd(w, vs, vs);      // 2 * v^2 * v2                        [w reused]
-  fe_modsub(a, a, vc);       // u^2 * w - v^3
-  fe_modsub(a, a, w);        // u^2 * w - v^3 - 2 * v^2 * v2
-  fe_modmul(r->x, v, a);     // x3 = v * a
-  fe_modsub(a, vs, a);       // v^2 * v2 - a                        [a reused]
-  fe_modmul(a, a, u);        // u * (v^2 * v2 - a)                  [a reused]
-  fe_modmul(u, vc, u2);      // v^3 * u2                            [u reused]
-  fe_modsub(r->y, a, u);     // y3 = u * (v^2 * v2 - a) - v^3 * u2
+  fe_modmul(u2, p->y, q->z);  // u2 = py * qz
+  fe_modmul(v2, p->x, q->z);  // v2 = px * qz
+  fe_modmul(u, q->y, p->z);   // u1 = qy * pz
+  fe_modmul(v, q->x, p->z);   // v1 = qx * pz
+  assert(fe_cmp(v, v2) != 0); // if (v1 == v2) return
+  fe_modmul(w, p->z, q->z);   // w = pz * qz
+  fe_modsub(u, u, u2);        // u = u1 - u2
+  fe_modsub(v, v, v2);        // v = v1 - v2
+  fe_modsqr(vs, v);           // v^2
+  fe_modmul(vc, vs, v);       // v^3
+  fe_modmul(vs, vs, v2);      // v^2 * v2
+  fe_modmul(r->z, vc, w);     // z3 = v^3 * w
+  fe_modsqr(a, u);            // u^2
+  fe_modmul(a, a, w);         // u^2 * w
+  fe_modadd(w, vs, vs);       // 2 * v^2 * v2                        [w reused]
+  fe_modsub(a, a, vc);        // u^2 * w - v^3
+  fe_modsub(a, a, w);         // u^2 * w - v^3 - 2 * v^2 * v2
+  fe_modmul(r->x, v, a);      // x3 = v * a
+  fe_modsub(a, vs, a);        // v^2 * v2 - a                        [a reused]
+  fe_modmul(a, a, u);         // u * (v^2 * v2 - a)                  [a reused]
+  fe_modmul(u, vc, u2);       // v^3 * u2                            [u reused]
+  fe_modsub(r->y, a, u);      // y3 = u * (v^2 * v2 - a) - v^3 * u2
 }
 
 void _ec_jacobi_rdc1(pe *r, const pe *a) {
@@ -625,6 +659,7 @@ void _ec_jacobi_add2(pe *r, const pe *p, const pe *q) {
   fe_modmul(s1, p->y, ta);     // S1 = py * qz ** 3
   fe_modsqr(tt, p->z);         // pz ** 2
   fe_modmul(u2, q->x, tt);     // U2 = qx * pz ** 2
+  assert(fe_cmp(u1, u2) != 0); // if (U1 == U2) return
   fe_modmul(ta, tt, p->z);     // pz ** 3
   fe_modmul(s2, q->y, ta);     // S2 = qy * pz ** 3
   fe_modsub(u2, u2, u1);       // H = U2 - U1              [u2 reused]
@@ -790,7 +825,7 @@ void ec_gtable_mul(pe *r, const fe pk) {
 
   for (u64 i = 0; i < d; ++i) {
     u64 b = k[0] & (n - 1);
-    fe_shiftr(k, GTABLE_W);
+    fe_shiftr64(k, GTABLE_W);
     if (!b) continue;
 
     u64 x = (n - 1) * i + b - 1;

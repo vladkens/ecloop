@@ -9,11 +9,6 @@ void print_res(char *label, u64 stime, u64 iters) {
   printf("%20s: %.2fM it/s ~ %.2fs\n", label, iters / dt / 1000000, dt);
 }
 
-void fe_rand(fe r) {
-  for (int i = 0; i < 4; ++i) r[i] = (u64)rand() << 32 | (u64)rand();
-  r[3] &= 0xfffffffefffffc2f;
-}
-
 void run_bench() {
   ec_gtable_init();
 
@@ -48,7 +43,7 @@ void run_bench() {
   srand(42);
   u64 numSize = 1024 * 16;
   fe numbers[numSize];
-  for (int i = 0; i < numSize; ++i) fe_rand(numbers[i]);
+  for (int i = 0; i < numSize; ++i) fe_prand(numbers[i]);
   pe_clone(&g, &G2);
 
   iters = 1000 * 10;
@@ -102,7 +97,7 @@ void run_bench_gtable() {
   srand(42);
   u64 numSize = 1024 * 16;
   fe numbers[numSize];
-  for (int i = 0; i < numSize; ++i) fe_rand(numbers[i]);
+  for (int i = 0; i < numSize; ++i) fe_prand(numbers[i]);
 
   u64 iters = 1000 * 500;
   u64 stime;

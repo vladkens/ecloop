@@ -12,15 +12,15 @@
 #define GROUP_INV_SIZE 1024
 #define MAX_LINE_SIZE 128
 
-enum Cmd { CMD_NIL, CMD_ADD, CMD_MUL };
+enum Cmd { CMD_NIL, CMD_ADD, CMD_MUL, CMD_RND };
 
 typedef struct ctx_t {
   enum Cmd cmd;
   pthread_mutex_t lock;
   size_t threads_count;
   pthread_t *threads;
-  size_t k_checked;
-  size_t k_found;
+  u64 k_checked;
+  u64 k_found;
   size_t stime;
   bool check_addr33;
   bool check_addr65;
@@ -36,12 +36,17 @@ typedef struct ctx_t {
   // cmd add
   fe range_s; // search range start
   fe range_e; // search range end
+  fe gs;      // base step for G-point grid (2^offset)
   pe gpoints[GROUP_INV_SIZE];
   u64 job_size;
 
   // cmd mul
   queue_t queue;
   bool raw_text;
+
+  // cmd rnd
+  u32 ord_offs; // offset (order) of range to search
+  u32 ord_size; // size (span) in range to search
 } ctx_t;
 
 int get_cpu_count() {
@@ -101,7 +106,8 @@ void ctx_print_status(ctx_t *ctx, bool final) {
   pthread_mutex_lock(&ctx->lock);
   double dt = (tsnow() - ctx->stime) / 1000.0;
   double it = ctx->k_checked / dt / 1000000;
-  printf("\r%.2fs ~ %.2fM it/s ~ %'zu / %'zu", dt, it, ctx->k_found, ctx->k_checked);
+  printf("\r\033[K");
+  printf("%.2fs ~ %.2fM it/s ~ %'llu / %'llu", dt, it, ctx->k_found, ctx->k_checked);
   if (final) printf("\n");
   fflush(stdout);
   pthread_mutex_unlock(&ctx->lock);
@@ -111,8 +117,9 @@ void ctx_write_found(ctx_t *ctx, const char *label, const h160_t hash, const fe 
   pthread_mutex_lock(&ctx->lock);
 
   if (!ctx->quiet) {
-    printf("\r%s: %08x%08x%08x%08x%08x <- %016llx%016llx%016llx%016llx\n", //
-           label, hash[0], hash[1], hash[2], hash[3], hash[4],             //
+    printf("\r\033[K");
+    printf("%s: %08x%08x%08x%08x%08x <- %016llx%016llx%016llx%016llx\n", //
+           label, hash[0], hash[1], hash[2], hash[3], hash[4],           //
            pk[3], pk[2], pk[1], pk[0]);
   }
 
@@ -161,6 +168,27 @@ bool ctx_check_found(ctx_t *ctx, const pe *cp, const fe pk) {
   return found;
 }
 
+void ctx_precompute_gpoints(ctx_t *ctx) {
+  // precompute gpoints (Gi, Gi*2, Gi*3, ...)
+  fe gs = {0};
+  fe_set64(gs, 1);
+  fe_shiftl(gs, ctx->ord_offs);
+  fe_clone(ctx->gs, gs);
+
+  pe g1, g2;
+  ec_jacobi_mul(&g1, &G1, gs);
+  ec_jacobi_dbl(&g2, &g1); // ecc can't calc Gi + Gi directly, so DBL(Gi) used
+  ec_jacobi_rdc(&g1, &g1);
+  ec_jacobi_rdc(&g2, &g2);
+
+  memcpy(ctx->gpoints + 0, &g1, sizeof(pe));
+  memcpy(ctx->gpoints + 1, &g2, sizeof(pe));
+  for (u64 i = 2; i < GROUP_INV_SIZE; ++i) {
+    ec_jacobi_add(ctx->gpoints + i, ctx->gpoints + i - 1, &g1);
+    ec_jacobi_rdc(ctx->gpoints + i, ctx->gpoints + i);
+  }
+}
+
 // MARK: CMD_ADD
 
 u64 batch_add(ctx_t *ctx, const fe pk, const u64 iterations) {
@@ -201,7 +229,7 @@ u64 batch_add(ctx_t *ctx, const fe pk, const u64 iterations) {
       fe_clone(bp[i].x, rx);
       fe_clone(bp[i].y, ry);
 
-      // ec_jacobi_add(&check_point, &check_point, &G1);
+      // ec_jacobi_add(&check_point, &check_point, &ctx->gpoints[0]);
       // ec_jacobi_rdc(&check_point, &check_point);
       // if (fe_cmp(rx, check_point.x) != 0 || fe_cmp(ry, check_point.y) != 0) {
       //   printf("error on 0x%llx\n", counter + i);
@@ -210,7 +238,7 @@ u64 batch_add(ctx_t *ctx, const fe pk, const u64 iterations) {
     }
 
     for (u64 i = 0; i < dx_size; ++i) {
-      fe_add64(ck, 1);
+      fe_modadd(ck, ck, ctx->gs);
       if (ctx_check_found(ctx, &bp[i], ck)) found += 1;
     }
 
@@ -225,6 +253,12 @@ u64 batch_add(ctx_t *ctx, const fe pk, const u64 iterations) {
 void *cmd_add_worker(void *arg) {
   ctx_t *ctx = (ctx_t *)arg;
 
+  // job_size multiply by 2^offset (iterate over desired digit order)
+  // for example: 2010, 2020, 2030, ..., 20X0
+  fe inc = {0};
+  fe_set64(inc, ctx->job_size);
+  fe_modmul(inc, inc, ctx->gs);
+
   fe pk;
   while (true) {
     pthread_mutex_lock(&ctx->lock);
@@ -234,7 +268,7 @@ void *cmd_add_worker(void *arg) {
     }
 
     fe_clone(pk, ctx->range_s);
-    fe_add64(ctx->range_s, ctx->job_size);
+    fe_modadd(ctx->range_s, ctx->range_s, inc);
     pthread_mutex_unlock(&ctx->lock);
 
     u64 found = batch_add(ctx, pk, ctx->job_size);
@@ -250,13 +284,7 @@ void *cmd_add_worker(void *arg) {
 }
 
 int cmd_add(ctx_t *ctx) {
-  // precompute gpoints
-  memcpy(ctx->gpoints + 0, &G1, sizeof(pe));
-  memcpy(ctx->gpoints + 1, &G2, sizeof(pe));
-  for (u64 i = 2; i < GROUP_INV_SIZE; ++i) {
-    ec_jacobi_add(ctx->gpoints + i, ctx->gpoints + i - 1, &G1);
-    ec_jacobi_rdc(ctx->gpoints + i, ctx->gpoints + i);
-  }
+  ctx_precompute_gpoints(ctx);
 
   fe range_size;
   fe_modsub(range_size, ctx->range_e, ctx->range_s);
@@ -382,6 +410,78 @@ int cmd_mul(ctx_t *ctx) {
   return 0;
 }
 
+// MARK: CMD_RND
+
+void print_range_mask(fe range_s, u32 bits_size, u32 offset) {
+  int mask_e = 255 - offset;
+  int mask_s = mask_e - bits_size + 1;
+
+  for (int i = 0; i < 64; i++) {
+    if (i % 16 == 0 && i != 0) putchar(' ');
+
+    int bits_s = i * 4;
+    int bits_e = bits_s + 3;
+
+    u32 fcc = (range_s[(255 - bits_e) / 64] >> ((255 - bits_e) % 64)) & 0xF;
+    char cc = "0123456789abcdef"[fcc];
+
+    bool flag = (bits_s >= mask_s && bits_s <= mask_e) || (bits_e >= mask_s && bits_e <= mask_e);
+    if (flag) {
+      printf("\033[33m%c\033[0m", cc); // yellow
+    } else {
+      putchar(cc);
+    }
+  }
+
+  putchar('\n');
+  fflush(stdout);
+}
+
+int cmd_rnd(ctx_t *ctx) {
+  ctx->ord_offs = MIN(ctx->ord_offs, 255 - ctx->ord_size);
+  printf("[RANDOM MODE] offs: %d ~ bits: %d\n\n", ctx->ord_offs, ctx->ord_size);
+
+  ctx_precompute_gpoints(ctx);
+  ctx->job_size = MAX_JOB_SIZE;
+
+  fe range_s, range_e;
+  fe_clone(range_s, ctx->range_s);
+  fe_clone(range_e, ctx->range_e);
+
+  u64 last_c = 0, last_f = 0, s_time = tsnow();
+  while (true) {
+    last_c = ctx->k_checked;
+    last_f = ctx->k_found;
+    s_time = tsnow();
+
+    // fe_set64(ctx->range_s, (u64)1 << 63); // debug
+    fe_rand_range(ctx->range_s, range_s, range_e);
+    fe_clone(ctx->range_e, ctx->range_s);
+    for (u32 i = ctx->ord_offs; i < (ctx->ord_offs + ctx->ord_size); ++i) {
+      ctx->range_s[i / 64] &= ~(1ULL << (i % 64));
+      ctx->range_e[i / 64] |= 1ULL << (i % 64);
+    }
+
+    print_range_mask(ctx->range_s, ctx->ord_size, ctx->ord_offs);
+    print_range_mask(ctx->range_e, ctx->ord_size, ctx->ord_offs);
+    ctx_print_status(ctx, false);
+
+    for (size_t i = 0; i < ctx->threads_count; ++i) {
+      pthread_create(&ctx->threads[i], NULL, cmd_add_worker, ctx);
+    }
+
+    for (size_t i = 0; i < ctx->threads_count; ++i) {
+      pthread_join(ctx->threads[i], NULL);
+    }
+
+    u64 dc = ctx->k_checked - last_c, df = ctx->k_found - last_f;
+    double dt = MAX((tsnow() - s_time), 1) / 1000.0;
+    printf("\r\033[K%'llu / %'llu ~ %.1fs\n\n", df, dc, dt);
+  }
+
+  return 0;
+}
+
 // MARK: args helpers
 
 void arg_search_range(args_t *args, fe range_s, fe range_e) {
@@ -411,6 +511,45 @@ void arg_search_range(args_t *args, fe range_s, fe range_e) {
   }
 }
 
+void load_offs_size(ctx_t *ctx, args_t *args) {
+  char *raw = arg_str(args, "-d");
+  if (!raw && ctx->cmd == CMD_RND) {
+    u32 bits = fe_bitlen(ctx->range_e);
+    ctx->ord_offs = urand64() % bits;
+    ctx->ord_size = 32;
+    return;
+  }
+
+  if (!raw) {
+    ctx->ord_offs = 0;
+    ctx->ord_size = 32;
+    return;
+  }
+
+  char *sep = strchr(raw, ':');
+  if (!sep) {
+    fprintf(stderr, "invalid offset:size format, use format: -d 128:32\n");
+    exit(1);
+  }
+
+  *sep = 0;
+  u32 tmp_offs = atoi(raw);
+  u32 tmp_size = atoi(sep + 1);
+
+  if (tmp_offs > 255) {
+    fprintf(stderr, "invalid offset, max is 255\n");
+    exit(1);
+  }
+
+  if (tmp_size < 24 || tmp_size > 64) {
+    fprintf(stderr, "invalid size, min is 24 and max is 64\n");
+    exit(1);
+  }
+
+  ctx->ord_offs = tmp_offs;
+  ctx->ord_size = tmp_size;
+}
+
 // MARK: main
 
 void usage(const char *name) {
@@ -419,12 +558,14 @@ void usage(const char *name) {
   printf("\nCompute commands:\n");
   printf("  add             - search in given range with batch addition\n");
   printf("  mul             - search hex encoded private keys (from stdin)\n");
+  printf("  rnd             - search random range of bits in given range\n");
   printf("\nCompute options:\n");
   printf("  -f <file>       - filter file to search (list of hashes or bloom fitler)\n");
   printf("  -o <file>       - output file to write found keys (default: stdout)\n");
   printf("  -t <threads>    - number of threads to run (default: 1)\n");
   printf("  -a <addr_type>  - address type to search: c - addr33, u - addr65 (default: c)\n");
   printf("  -r <range>      - search range in hex format (example: 8000:ffff, default all)\n");
+  printf("  -d <offs:size>  - bit offset and size for search (example: 128:32, default: 0:32)\n");
   printf("  -q              - quiet mode (no output to stdout; -o required)\n");
   printf("\nOther commands:\n");
   printf("  blf-gen         - create bloom filter from list of hex-encoded hash160\n");
@@ -445,6 +586,7 @@ void init(ctx_t *ctx, args_t *args) {
   if (args->argc > 1) {
     if (strcmp(args->argv[1], "add") == 0) ctx->cmd = CMD_ADD;
     if (strcmp(args->argv[1], "mul") == 0) ctx->cmd = CMD_MUL;
+    if (strcmp(args->argv[1], "rnd") == 0) ctx->cmd = CMD_RND;
   }
 
   if (ctx->cmd == CMD_NIL) {
@@ -484,6 +626,7 @@ void init(ctx_t *ctx, args_t *args) {
   ctx->stime = tsnow();
 
   arg_search_range(args, ctx->range_s, ctx->range_e);
+  load_offs_size(ctx, args);
   queue_init(&ctx->queue, ctx->threads_count * 3);
 
   printf("threads: %zu ~ addr33: %d ~ addr65: %d | filter: ", //
@@ -515,6 +658,7 @@ int main(int argc, const char **argv) {
 
   if (ctx.cmd == CMD_ADD) cmd_add(&ctx);
   if (ctx.cmd == CMD_MUL) cmd_mul(&ctx);
+  if (ctx.cmd == CMD_RND) cmd_rnd(&ctx);
 
   if (ctx.outfile != NULL) fclose(ctx.outfile);
   return 0;

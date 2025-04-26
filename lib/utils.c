@@ -1,5 +1,6 @@
 #pragma once
 
+#include <assert.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -32,6 +33,77 @@ bool strendswith(const char *str, const char *suffix) {
   size_t str_len = strlen(str);
   size_t suffix_len = strlen(suffix);
   return (str_len >= suffix_len) && (strcmp(str + str_len - suffix_len, suffix) == 0);
+}
+
+// MARK: pseudo random
+
+u64 prand64() { return (u64)rand() << 32 | (u64)rand(); }
+
+void fe_prand(fe r) {
+  for (int i = 0; i < 4; ++i) r[i] = prand64();
+  r[3] &= 0xfffffffefffffc2f;
+}
+
+// MARK: secure urandom
+
+static FILE *_urandom = NULL;
+
+static void _close_urandom(void) {
+  if (_urandom != NULL) {
+    fclose(_urandom);
+    _urandom = NULL;
+  }
+}
+
+u64 urand64() {
+  if (_urandom == NULL) {
+    _urandom = fopen("/dev/urandom", "rb");
+    if (_urandom == NULL) {
+      fprintf(stderr, "failed to open /dev/urandom\n");
+      exit(1);
+    }
+
+    atexit(_close_urandom);
+  }
+
+  u64 r;
+  if (fread(&r, sizeof(r), 1, _urandom) != 1) {
+    fprintf(stderr, "failed to read from /dev/urandom\n");
+    exit(1);
+  }
+
+  return r;
+}
+
+void fe_urand(fe r) {
+  for (int i = 0; i < 4; ++i) r[i] = urand64();
+  r[3] &= 0xfffffffefffffc2f;
+}
+
+void fe_rand_range(fe r, const fe a, const fe b) {
+  fe range, x;
+  fe_modsub(range, b, a); // range = b - a
+  fe_add64(range, 1);     // range = range + 1
+
+  size_t bits = fe_bitlen(range);
+  assert(bits > 0 && bits <= 256);
+
+  do {
+    fe_urand(x);
+
+    // drop unused bits
+    int top = (bits - 1) / 64;
+    for (int i = top + 1; i < 4; ++i) x[i] = 0;
+
+    int rem = bits % 64;
+    if (rem) x[top] &= (1ULL << rem) - 1;
+
+  } while (fe_cmp(x, range) >= 0);
+
+  fe_modadd(x, x, a);
+  assert(fe_cmp(x, a) >= 0);
+  assert(fe_cmp(x, b) <= 0);
+  fe_clone(r, x);
 }
 
 // MARK: args

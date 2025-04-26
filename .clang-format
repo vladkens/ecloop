@@ -1,0 +1,7 @@
+---
+ColumnLimit: 100
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
+IndentPPDirectives: BeforeHash
+AllowShortBlocksOnASingleLine: Empty
+AllowShortLoopsOnASingleLine: true
+InsertNewlineAtEOF: true
