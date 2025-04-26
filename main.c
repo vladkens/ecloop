@@ -420,6 +420,19 @@ int cmd_mul(ctx_t *ctx) {
 
 // MARK: CMD_RND
 
+void term_color_yellow() {
+  // todo: use isatty
+  fflush(stdout);
+  fprintf(stderr, "\033[33m"); // yellow
+  fflush(stderr);
+}
+
+void term_color_reset() {
+  fflush(stdout);
+  fprintf(stderr, "\033[0m"); // reset
+  fflush(stderr);
+}
+
 void print_range_mask(fe range_s, u32 bits_size, u32 offset) {
   int mask_e = 255 - offset;
   int mask_s = mask_e - bits_size + 1;
@@ -435,9 +448,9 @@ void print_range_mask(fe range_s, u32 bits_size, u32 offset) {
 
     bool flag = (bits_s >= mask_s && bits_s <= mask_e) || (bits_e >= mask_s && bits_e <= mask_e);
     if (flag) {
-      fprintf(stderr, "\033[33m"); // yellow
+      term_color_yellow();
       putchar(cc);
-      fprintf(stderr, "\033[0m"); // reset
+      term_color_reset();
     } else {
       putchar(cc);
     }
