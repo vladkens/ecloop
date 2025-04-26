@@ -1,3 +1,7 @@
+// Copyright (c) vladkens
+// https://github.com/vladkens/ecloop
+// Licensed under the MIT License.
+
 #pragma once
 
 #include "addr.c"

@@ -11,6 +11,7 @@ A high-performance, CPU-optimized tool for computing public keys on the secp256k
 - 🍇 Precomputed table for points multiplication
 - 🔍 Search for compressed & uncompressed public keys (hash160)
 - 🌟 Utilizes SIMD for optimized sha256 (uses SHA extensions, both ARM and Intel)
+- 🎲 Random search within customizable bit ranges
 - 🍎 Works seamlessly on MacOS and Linux
 - 🔧 Customizable search range and thread count for flexible usage
 
@@ -159,6 +160,18 @@ If no errors appear, `ecloop` has been compiled successfully and is ready to use
 ## Disclaimer
 
 This project is written to learn the math over elliptic curves in cryptocurrencies. Functionality as a search for Bitcoin Puzzles is added as a real-world use case.
+
+## Donations
+
+If you find this project useful, consider supporting its development:
+
+- **BTC**: `bc1q4c3mxpm50awx9qaprx54k5x3t5m9ex658yzk4j`
+- **ETH**: `0x4DF8E04C5AC0b06fb9938581D8a1732D5A78703E`
+- **SOL**: `4r3CeYxvwJa1btZudmLpHeu2yzeudRw4UTqMUZScD63j`
+- **XMR**: `85yjYN1sU3sgGFEkdqLKKxdiQwzQjqyhT74m5j4xwmKqHYfensRMjJrB1HvE9H6R6G5wG938KDpkJLum6GQd5q5yTTk8uhj`
+- [Buy Me a Coffee](https://buymeacoffee.com/vladkens)
+
+Thank you for your support!
 
 ## Cudos to
 

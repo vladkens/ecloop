@@ -1,3 +1,7 @@
+// Copyright (c) vladkens
+// https://github.com/vladkens/ecloop
+// Licensed under the MIT License.
+
 #include <locale.h>
 #include <stdbool.h>
 #include <string.h>
@@ -7,7 +11,7 @@
 #include "lib/ecc.c"
 #include "lib/utils.c"
 
-#define VERSION "0.2.1"
+#define VERSION "0.3.0"
 #define MAX_JOB_SIZE 1024 * 1024 * 2
 #define GROUP_INV_SIZE 1024
 #define MAX_LINE_SIZE 128
@@ -102,22 +106,26 @@ void load_filter(ctx_t *ctx, const char *filepath) {
   fclose(file);
 }
 
+void clear_line() { fprintf(stderr, "\r\033[K"); }
+
 void ctx_print_status(ctx_t *ctx, bool final) {
   pthread_mutex_lock(&ctx->lock);
   double dt = (tsnow() - ctx->stime) / 1000.0;
   double it = ctx->k_checked / dt / 1000000;
-  printf("\r\033[K");
-  printf("%.2fs ~ %.2fM it/s ~ %'llu / %'llu", dt, it, ctx->k_found, ctx->k_checked);
-  if (final) printf("\n");
-  fflush(stdout);
+  clear_line();
+  fprintf(stderr, "%.2fs ~ %.2fM it/s ~ %'llu / %'llu%c", //
+          dt, it, ctx->k_found, ctx->k_checked, final ? '\n' : '\r');
   pthread_mutex_unlock(&ctx->lock);
+
+  fflush(stdout);
+  fflush(stderr);
 }
 
 void ctx_write_found(ctx_t *ctx, const char *label, const h160_t hash, const fe pk) {
   pthread_mutex_lock(&ctx->lock);
 
   if (!ctx->quiet) {
-    printf("\r\033[K");
+    clear_line();
     printf("%s: %08x%08x%08x%08x%08x <- %016llx%016llx%016llx%016llx\n", //
            label, hash[0], hash[1], hash[2], hash[3], hash[4],           //
            pk[3], pk[2], pk[1], pk[0]);
@@ -427,14 +435,15 @@ void print_range_mask(fe range_s, u32 bits_size, u32 offset) {
 
     bool flag = (bits_s >= mask_s && bits_s <= mask_e) || (bits_e >= mask_s && bits_e <= mask_e);
     if (flag) {
-      printf("\033[33m%c\033[0m", cc); // yellow
+      fprintf(stderr, "\033[33m"); // yellow
+      putchar(cc);
+      fprintf(stderr, "\033[0m"); // reset
     } else {
       putchar(cc);
     }
   }
 
   putchar('\n');
-  fflush(stdout);
 }
 
 int cmd_rnd(ctx_t *ctx) {
@@ -476,7 +485,8 @@ int cmd_rnd(ctx_t *ctx) {
 
     u64 dc = ctx->k_checked - last_c, df = ctx->k_found - last_f;
     double dt = MAX((tsnow() - s_time), 1) / 1000.0;
-    printf("\r\033[K%'llu / %'llu ~ %.1fs\n\n", df, dc, dt);
+    clear_line();
+    printf("%'llu / %'llu ~ %.1fs\n\n", df, dc, dt);
   }
 
   return 0;
