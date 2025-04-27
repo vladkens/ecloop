@@ -49,6 +49,7 @@ typedef struct ctx_t {
   bool raw_text;
 
   // cmd rnd
+  bool has_seed;
   u32 ord_offs; // offset (order) of range to search
   u32 ord_size; // size (span) in range to search
 } ctx_t;
@@ -106,13 +107,11 @@ void load_filter(ctx_t *ctx, const char *filepath) {
   fclose(file);
 }
 
-void clear_line() { fprintf(stderr, "\r\033[K"); }
-
 void ctx_print_status(ctx_t *ctx, bool final) {
   pthread_mutex_lock(&ctx->lock);
   double dt = (tsnow() - ctx->stime) / 1000.0;
   double it = ctx->k_checked / dt / 1000000;
-  clear_line();
+  term_clear_line();
   fprintf(stderr, "%.2fs ~ %.2fM it/s ~ %'llu / %'llu%c", //
           dt, it, ctx->k_found, ctx->k_checked, final ? '\n' : '\r');
   pthread_mutex_unlock(&ctx->lock);
@@ -125,7 +124,7 @@ void ctx_write_found(ctx_t *ctx, const char *label, const h160_t hash, const fe 
   pthread_mutex_lock(&ctx->lock);
 
   if (!ctx->quiet) {
-    clear_line();
+    term_clear_line();
     printf("%s: %08x%08x%08x%08x%08x <- %016llx%016llx%016llx%016llx\n", //
            label, hash[0], hash[1], hash[2], hash[3], hash[4],           //
            pk[3], pk[2], pk[1], pk[0]);
@@ -261,8 +260,11 @@ u64 batch_add(ctx_t *ctx, const fe pk, const u64 iterations) {
 void *cmd_add_worker(void *arg) {
   ctx_t *ctx = (ctx_t *)arg;
 
+  fe initial_r; // keep initial range start to check overflow
+  fe_clone(initial_r, ctx->range_s);
+
   // job_size multiply by 2^offset (iterate over desired digit order)
-  // for example: 2010, 2020, 2030, ..., 20X0
+  // for example: 3013 3023 .. 30X3 .. 3093 3103 3113
   fe inc = {0};
   fe_set64(inc, ctx->job_size);
   fe_modmul(inc, inc, ctx->gs);
@@ -270,7 +272,8 @@ void *cmd_add_worker(void *arg) {
   fe pk;
   while (true) {
     pthread_mutex_lock(&ctx->lock);
-    if (fe_cmp(ctx->range_s, ctx->range_e) >= 0) {
+    bool is_overflow = fe_cmp(ctx->range_s, initial_r) < 0;
+    if (fe_cmp(ctx->range_s, ctx->range_e) >= 0 || is_overflow) {
       pthread_mutex_unlock(&ctx->lock);
       break;
     }
@@ -420,17 +423,13 @@ int cmd_mul(ctx_t *ctx) {
 
 // MARK: CMD_RND
 
-void term_color_yellow() {
-  // todo: use isatty
-  fflush(stdout);
-  fprintf(stderr, "\033[33m"); // yellow
-  fflush(stderr);
-}
-
-void term_color_reset() {
-  fflush(stdout);
-  fprintf(stderr, "\033[0m"); // reset
-  fflush(stderr);
+void gen_random_range(ctx_t *ctx, const fe a, const fe b) {
+  fe_rand_range(ctx->range_s, a, b, !ctx->has_seed);
+  fe_clone(ctx->range_e, ctx->range_s);
+  for (u32 i = ctx->ord_offs; i < (ctx->ord_offs + ctx->ord_size); ++i) {
+    ctx->range_s[i / 64] &= ~(1ULL << (i % 64));
+    ctx->range_e[i / 64] |= 1ULL << (i % 64);
+  }
 }
 
 void print_range_mask(fe range_s, u32 bits_size, u32 offset) {
@@ -476,14 +475,7 @@ int cmd_rnd(ctx_t *ctx) {
     last_f = ctx->k_found;
     s_time = tsnow();
 
-    // fe_set64(ctx->range_s, (u64)1 << 63); // debug
-    fe_rand_range(ctx->range_s, range_s, range_e);
-    fe_clone(ctx->range_e, ctx->range_s);
-    for (u32 i = ctx->ord_offs; i < (ctx->ord_offs + ctx->ord_size); ++i) {
-      ctx->range_s[i / 64] &= ~(1ULL << (i % 64));
-      ctx->range_e[i / 64] |= 1ULL << (i % 64);
-    }
-
+    gen_random_range(ctx, range_s, range_e);
     print_range_mask(ctx->range_s, ctx->ord_size, ctx->ord_offs);
     print_range_mask(ctx->range_e, ctx->ord_size, ctx->ord_offs);
     ctx_print_status(ctx, false);
@@ -498,7 +490,7 @@ int cmd_rnd(ctx_t *ctx) {
 
     u64 dc = ctx->k_checked - last_c, df = ctx->k_found - last_f;
     double dt = MAX((tsnow() - s_time), 1) / 1000.0;
-    clear_line();
+    term_clear_line();
     printf("%'llu / %'llu ~ %.1fs\n\n", df, dc, dt);
   }
 
@@ -538,7 +530,7 @@ void load_offs_size(ctx_t *ctx, args_t *args) {
   char *raw = arg_str(args, "-d");
   if (!raw && ctx->cmd == CMD_RND) {
     u32 bits = fe_bitlen(ctx->range_e);
-    ctx->ord_offs = urand64() % bits;
+    ctx->ord_offs = rand64(!ctx->has_seed) % bits;
     ctx->ord_size = 32;
     return;
   }
@@ -605,7 +597,7 @@ void init(ctx_t *ctx, args_t *args) {
     if (strcmp(args->argv[1], "bench-gtable") == 0) return run_bench_gtable();
   }
 
-  ctx->cmd = CMD_NIL; // default to batch add
+  ctx->cmd = CMD_NIL; // default show help
   if (args->argc > 1) {
     if (strcmp(args->argv[1], "add") == 0) ctx->cmd = CMD_ADD;
     if (strcmp(args->argv[1], "mul") == 0) ctx->cmd = CMD_MUL;
@@ -616,6 +608,13 @@ void init(ctx_t *ctx, args_t *args) {
     if (args_bool(args, "-v")) printf("ecloop v%s\n", VERSION);
     else usage(args->argv[0]);
     exit(0);
+  }
+
+  ctx->has_seed = false;
+  char *seed = arg_str(args, "-seed");
+  if (seed != NULL) {
+    ctx->has_seed = true;
+    srand(encode_seed(seed));
   }
 
   char *path = arg_str(args, "-f");

@@ -5,10 +5,14 @@
   "[json]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode"
   },
+  "[py]": {
+    "editor.defaultFormatter": "charliermarsh.ruff"
+  },
   "editor.formatOnSave": true,
   "files.exclude": {
     "a.out": true,
     "ecloop": true
   },
-  "prettier.requireConfig": false
+  "prettier.requireConfig": false,
+  "ruff.lineLength": 99
 }

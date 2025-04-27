@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "ecc.c"
 #include <assert.h>
 #include <math.h>
 #include <pthread.h>
@@ -14,11 +15,6 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-
-typedef __uint128_t u128;
-typedef unsigned long long u64;
-typedef unsigned int u32;
-typedef unsigned char u8;
 
 typedef char hex40[41]; // rmd160 hex string
 typedef char hex64[65]; // sha256 hex string
@@ -39,16 +35,24 @@ bool strendswith(const char *str, const char *suffix) {
   return (str_len >= suffix_len) && (strcmp(str + str_len - suffix_len, suffix) == 0);
 }
 
-// MARK: pseudo random
+// MARK: terminal
 
-u64 prand64() { return (u64)rand() << 32 | (u64)rand(); }
+void term_clear_line() { fprintf(stderr, "\r\033[K"); }
 
-void fe_prand(fe r) {
-  for (int i = 0; i < 4; ++i) r[i] = prand64();
-  r[3] &= 0xfffffffefffffc2f;
+void term_color_yellow() {
+  // todo: use isatty
+  fflush(stdout);
+  fprintf(stderr, "\033[33m"); // yellow
+  fflush(stderr);
 }
 
-// MARK: secure urandom
+void term_color_reset() {
+  fflush(stdout);
+  fprintf(stderr, "\033[0m"); // reset
+  fflush(stderr);
+}
+
+// MARK: random helpers
 
 static FILE *_urandom = NULL;
 
@@ -59,7 +63,9 @@ static void _close_urandom(void) {
   }
 }
 
-u64 urand64() {
+u64 _prand64() { return (u64)rand() << 32 | (u64)rand(); }
+
+u64 _urand64() {
   if (_urandom == NULL) {
     _urandom = fopen("/dev/urandom", "rb");
     if (_urandom == NULL) {
@@ -79,12 +85,31 @@ u64 urand64() {
   return r;
 }
 
-void fe_urand(fe r) {
-  for (int i = 0; i < 4; ++i) r[i] = urand64();
+INLINE u64 rand64(bool urandom) { return urandom ? _urand64() : _prand64(); }
+
+u32 encode_seed(const char *seed) {
+  u32 hash = 0;
+  while (*seed) {
+    char c = *seed++;
+    hash = (hash << 5) - hash + (unsigned char)c;
+    hash &= 0xFFFFFFFF;
+  }
+  return hash;
+}
+
+// MARK: fe_random
+
+void fe_prand(fe r) {
+  for (int i = 0; i < 4; ++i) r[i] = _prand64();
   r[3] &= 0xfffffffefffffc2f;
 }
 
-void fe_rand_range(fe r, const fe a, const fe b) {
+void fe_urand(fe r) {
+  for (int i = 0; i < 4; ++i) r[i] = _urand64();
+  r[3] &= 0xfffffffefffffc2f;
+}
+
+void fe_rand_range(fe r, const fe a, const fe b, bool urandom) {
   fe range, x;
   fe_modsub(range, b, a); // range = b - a
   fe_add64(range, 1);     // range = range + 1
@@ -93,7 +118,7 @@ void fe_rand_range(fe r, const fe a, const fe b) {
   assert(bits > 0 && bits <= 256);
 
   do {
-    fe_urand(x);
+    urandom ? fe_urand(x) : fe_prand(x);
 
     // drop unused bits
     int top = (bits - 1) / 64;
@@ -378,7 +403,7 @@ void blf_gen(args_t *args) {
   blf_t blf = {.size = 0, .bits = NULL};
   if (access(filepath, F_OK) == 0) blf_load(filepath, &blf);
 
-  // https://hur.st/bloomfilter/?n=500M&p=1000000&m=&k=20
+  // https://hur.st/bloomfilter/?n=500M&p=1e9&m=&k=20
   u64 r = 1e9;
   double p = 1.0 / (double)r;
   u64 m = (u64)(n * log(p) / log(1.0 / pow(2.0, log(2.0))));

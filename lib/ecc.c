@@ -56,7 +56,7 @@ INLINE u64 umul128(const u64 a, const u64 b, u64 *hi) {
 }
 
 // MARK: Field element
-typedef u64 fe[4]; // 256bit as 4x64bit (a3 a2 a1 a0)
+typedef u64 fe[4]; // 256bit as 4x64bit (a0 + a1*2^64 + a2*2^128 + a3*2^192)
 
 // prime field P = 2^256 - 2^32 - 977
 static const fe P = {

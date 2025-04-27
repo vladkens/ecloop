@@ -8,7 +8,7 @@ def run(cmd: str | list[str]):
     cmd = " ".join(cmd) if isinstance(cmd, list) else cmd
     res = subprocess.run(f"sh -c '{cmd}'", shell=True, text=True, stdout=PIPE, stderr=PIPE)
     assert res.returncode == 0, f"Failed to run command: {cmd}"
-    return res.stdout, time.time() - stime
+    return res.stdout + res.stderr, time.time() - stime
 
 
 def parse_final(out: str):
