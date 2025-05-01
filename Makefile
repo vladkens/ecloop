@@ -1,5 +1,6 @@
 .PHONY: default clean build bench fmt add mul rnd blf remote
 
+CC = cc
 CC_FLAGS ?= -O3
 
 ifeq ($(shell uname -m),x86_64)
@@ -12,7 +13,7 @@ clean:
 	@rm -rf ecloop bench main a.out *.profraw *.profdata
 
 build: clean
-	cc $(CC_FLAGS) main.c -o ecloop
+	$(CC) $(CC_FLAGS) main.c -o ecloop
 
 bench: build
 	./ecloop bench
