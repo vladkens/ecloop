@@ -527,17 +527,23 @@ void arg_search_range(args_t *args, fe range_s, fe range_e) {
 }
 
 void load_offs_size(ctx_t *ctx, args_t *args) {
+  const u32 MIN_SIZE = 20;
+  const u32 MAX_SIZE = 64;
+
+  u32 range_bits = fe_bitlen(ctx->range_e);
+  u32 default_bits = range_bits < 32 ? MAX(MIN_SIZE, range_bits) : 32;
+  u32 max_offs = MAX(1, MAX(MIN_SIZE, range_bits) - default_bits);
+
   char *raw = arg_str(args, "-d");
   if (!raw && ctx->cmd == CMD_RND) {
-    u32 bits = fe_bitlen(ctx->range_e);
-    ctx->ord_offs = rand64(!ctx->has_seed) % bits;
-    ctx->ord_size = 32;
+    ctx->ord_offs = rand64(!ctx->has_seed) % max_offs;
+    ctx->ord_size = default_bits;
     return;
   }
 
   if (!raw) {
     ctx->ord_offs = 0;
-    ctx->ord_size = 32;
+    ctx->ord_size = default_bits;
     return;
   }
 
@@ -556,8 +562,8 @@ void load_offs_size(ctx_t *ctx, args_t *args) {
     exit(1);
   }
 
-  if (tmp_size < 24 || tmp_size > 64) {
-    fprintf(stderr, "invalid size, min is 24 and max is 64\n");
+  if (tmp_size < MIN_SIZE || tmp_size > MAX_SIZE) {
+    fprintf(stderr, "invalid size, min is %d and max is %d\n", MIN_SIZE, MAX_SIZE);
     exit(1);
   }
 
