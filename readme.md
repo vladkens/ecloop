@@ -22,6 +22,17 @@ git clone https://github.com/vladkens/ecloop.git && cd ecloop
 make build
 ```
 
+_Note: By default, `cc` will be used as the compiler. Using `clang` may produce [faster code](https://github.com/vladkens/ecloop/issues/7) than `gcc`._
+
+The compiler can be specified explicitly for any `make` command with the `CC` parameter, for example: `make add CC=clang`.
+
+Also, verify correctness with the following commands (some compiler versions may have issues with built-ins, which are used in the code):
+
+```sh
+make add # should found 9 keys
+make mul # should found 1080 keys
+```
+
 ## Usage
 
 ```text

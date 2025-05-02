@@ -10,42 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
-#define MAX(X, Y) (((X) > (Y)) ? (X) : (Y))
-#define INLINE static inline
-
-typedef __uint128_t u128;
-typedef unsigned long long u64;
-typedef unsigned int u32;
-typedef unsigned char u8;
-
-// https://clang.llvm.org/docs/LanguageExtensions.html#:~:text=__builtin_addcll
-// https://gcc.gnu.org/onlinedocs/gcc/Integer-Overflow-Builtins.html#:~:text=__builtin_uaddll_overflow
-
-#if !defined(__clang__) && defined(__GNUC__) && !defined(__builtin_addcll)
-u64 __builtin_addcll(u64 x, u64 y, u64 carryin, u64 *carryout) {
-  u64 rs;
-  bool overflow1 = __builtin_uaddll_overflow(x, y, &rs);
-  bool overflow2 = __builtin_uaddll_overflow(rs, carryin, &rs);
-
-  *carryout = (overflow1 || overflow2) ? 1 : 0;
-  return rs;
-}
-#endif
-
-// https://clang.llvm.org/docs/LanguageExtensions.html#:~:text=__builtin_subcll
-// https://gcc.gnu.org/onlinedocs/gcc/Integer-Overflow-Builtins.html#:~:text=__builtin_usubll_overflow
-
-#if !defined(__clang__) && defined(__GNUC__) && !defined(__builtin_subcll)
-u64 __builtin_subcll(u64 x, u64 y, u64 carryin, u64 *carryout) {
-  u64 rs;
-  bool underflow1 = __builtin_usubll_overflow(x, y, &rs);
-  bool underflow2 = __builtin_usubll_overflow(rs, carryin, &rs);
-
-  *carryout = (underflow1 || underflow2) ? 1 : 0;
-  return rs;
-}
-#endif
+#include "compat.c"
 
 INLINE u64 umul128(const u64 a, const u64 b, u64 *hi) {
   // https://stackoverflow.com/a/50958815
@@ -86,10 +51,10 @@ size_t fe_bitlen(const fe a) {
 
 void fe_add64(fe r, const u64 a) {
   u64 c = 0;
-  r[0] = __builtin_addcll(r[0], a, 0, &c);
-  r[1] = __builtin_addcll(r[1], 0, c, &c);
-  r[2] = __builtin_addcll(r[2], 0, c, &c);
-  r[3] = __builtin_addcll(r[3], 0, c, &c);
+  r[0] = addc64(r[0], a, 0, &c);
+  r[1] = addc64(r[1], 0, c, &c);
+  r[2] = addc64(r[2], 0, c, &c);
+  r[3] = addc64(r[3], 0, c, &c);
 }
 
 int fe_cmp64(const fe a, const u64 b) {
@@ -112,39 +77,39 @@ int fe_cmp(const fe a, const fe b) {
 
 void fe_modneg(fe r, const fe a) { // r = -a (mod P)
   u64 c = 0;
-  r[0] = __builtin_subcll(P[0], a[0], c, &c);
-  r[1] = __builtin_subcll(P[1], a[1], c, &c);
-  r[2] = __builtin_subcll(P[2], a[2], c, &c);
-  r[3] = __builtin_subcll(P[3], a[3], c, &c);
+  r[0] = subc64(P[0], a[0], c, &c);
+  r[1] = subc64(P[1], a[1], c, &c);
+  r[2] = subc64(P[2], a[2], c, &c);
+  r[3] = subc64(P[3], a[3], c, &c);
 }
 
 void fe_modsub(fe r, const fe a, const fe b) { // r = a - b (mod P)
   u64 c = 0;
-  r[0] = __builtin_subcll(a[0], b[0], c, &c);
-  r[1] = __builtin_subcll(a[1], b[1], c, &c);
-  r[2] = __builtin_subcll(a[2], b[2], c, &c);
-  r[3] = __builtin_subcll(a[3], b[3], c, &c);
+  r[0] = subc64(a[0], b[0], c, &c);
+  r[1] = subc64(a[1], b[1], c, &c);
+  r[2] = subc64(a[2], b[2], c, &c);
+  r[3] = subc64(a[3], b[3], c, &c);
 
   if (c) {
-    r[0] = __builtin_addcll(r[0], P[0], 0, &c);
-    r[1] = __builtin_addcll(r[1], P[1], c, &c);
-    r[2] = __builtin_addcll(r[2], P[2], c, &c);
-    r[3] = __builtin_addcll(r[3], P[3], c, &c);
+    r[0] = addc64(r[0], P[0], 0, &c);
+    r[1] = addc64(r[1], P[1], c, &c);
+    r[2] = addc64(r[2], P[2], c, &c);
+    r[3] = addc64(r[3], P[3], c, &c);
   }
 }
 
 void fe_modadd(fe r, const fe a, const fe b) { // r = a + b (mod P)
   u64 c = 0;
-  r[0] = __builtin_addcll(a[0], b[0], c, &c);
-  r[1] = __builtin_addcll(a[1], b[1], c, &c);
-  r[2] = __builtin_addcll(a[2], b[2], c, &c);
-  r[3] = __builtin_addcll(a[3], b[3], c, &c);
+  r[0] = addc64(a[0], b[0], c, &c);
+  r[1] = addc64(a[1], b[1], c, &c);
+  r[2] = addc64(a[2], b[2], c, &c);
+  r[3] = addc64(a[3], b[3], c, &c);
 
   if (c) {
-    r[0] = __builtin_subcll(r[0], P[0], 0, &c);
-    r[1] = __builtin_subcll(r[1], P[1], c, &c);
-    r[2] = __builtin_subcll(r[2], P[2], c, &c);
-    r[3] = __builtin_subcll(r[3], P[3], c, &c);
+    r[0] = subc64(r[0], P[0], 0, &c);
+    r[1] = subc64(r[1], P[1], c, &c);
+    r[2] = subc64(r[2], P[2], c, &c);
+    r[3] = subc64(r[3], P[3], c, &c);
   }
 
   u64 f = (r[3] >= P[3] && r[2] >= P[2] && r[1] >= P[1] && r[0] >= P[0]);
@@ -154,10 +119,10 @@ void fe_modadd(fe r, const fe a, const fe b) { // r = a + b (mod P)
 void fe_mul_scalar(u64 r[5], const fe a, const u64 b) { // 256bit * 64bit -> 320bit
   u64 h1, h2, c = 0;
   r[0] = umul128(a[0], b, &h1);
-  r[1] = __builtin_addcll(umul128(a[1], b, &h2), h1, c, &c);
-  r[2] = __builtin_addcll(umul128(a[2], b, &h1), h2, c, &c);
-  r[3] = __builtin_addcll(umul128(a[3], b, &h2), h1, c, &c);
-  r[4] = __builtin_addcll(0, h2, c, &c);
+  r[1] = addc64(umul128(a[1], b, &h2), h1, c, &c);
+  r[2] = addc64(umul128(a[2], b, &h1), h2, c, &c);
+  r[3] = addc64(umul128(a[3], b, &h2), h1, c, &c);
+  r[4] = addc64(0, h2, c, &c);
 }
 
 void fe_modmul(fe r, const fe a, const fe b) {
@@ -166,38 +131,38 @@ void fe_modmul(fe r, const fe a, const fe b) {
   // 256bit * 256bit -> 512bit
   fe_mul_scalar(rr, a, b[0]);
   fe_mul_scalar(tt, a, b[1]);
-  rr[1] = __builtin_addcll(rr[1], tt[0], c, &c);
-  rr[2] = __builtin_addcll(rr[2], tt[1], c, &c);
-  rr[3] = __builtin_addcll(rr[3], tt[2], c, &c);
-  rr[4] = __builtin_addcll(rr[4], tt[3], c, &c);
-  rr[5] = __builtin_addcll(rr[5], tt[4], c, &c);
+  rr[1] = addc64(rr[1], tt[0], c, &c);
+  rr[2] = addc64(rr[2], tt[1], c, &c);
+  rr[3] = addc64(rr[3], tt[2], c, &c);
+  rr[4] = addc64(rr[4], tt[3], c, &c);
+  rr[5] = addc64(rr[5], tt[4], c, &c);
   fe_mul_scalar(tt, a, b[2]);
-  rr[2] = __builtin_addcll(rr[2], tt[0], c, &c);
-  rr[3] = __builtin_addcll(rr[3], tt[1], c, &c);
-  rr[4] = __builtin_addcll(rr[4], tt[2], c, &c);
-  rr[5] = __builtin_addcll(rr[5], tt[3], c, &c);
-  rr[6] = __builtin_addcll(rr[6], tt[4], c, &c);
+  rr[2] = addc64(rr[2], tt[0], c, &c);
+  rr[3] = addc64(rr[3], tt[1], c, &c);
+  rr[4] = addc64(rr[4], tt[2], c, &c);
+  rr[5] = addc64(rr[5], tt[3], c, &c);
+  rr[6] = addc64(rr[6], tt[4], c, &c);
   fe_mul_scalar(tt, a, b[3]);
-  rr[3] = __builtin_addcll(rr[3], tt[0], c, &c);
-  rr[4] = __builtin_addcll(rr[4], tt[1], c, &c);
-  rr[5] = __builtin_addcll(rr[5], tt[2], c, &c);
-  rr[6] = __builtin_addcll(rr[6], tt[3], c, &c);
-  rr[7] = __builtin_addcll(rr[7], tt[4], c, &c);
+  rr[3] = addc64(rr[3], tt[0], c, &c);
+  rr[4] = addc64(rr[4], tt[1], c, &c);
+  rr[5] = addc64(rr[5], tt[2], c, &c);
+  rr[6] = addc64(rr[6], tt[3], c, &c);
+  rr[7] = addc64(rr[7], tt[4], c, &c);
 
   // reduce 512bit -> 320bit
   fe_mul_scalar(tt, rr + 4, 0x1000003D1ULL);
-  rr[0] = __builtin_addcll(rr[0], tt[0], 0, &c);
-  rr[1] = __builtin_addcll(rr[1], tt[1], c, &c);
-  rr[2] = __builtin_addcll(rr[2], tt[2], c, &c);
-  rr[3] = __builtin_addcll(rr[3], tt[3], c, &c);
+  rr[0] = addc64(rr[0], tt[0], 0, &c);
+  rr[1] = addc64(rr[1], tt[1], c, &c);
+  rr[2] = addc64(rr[2], tt[2], c, &c);
+  rr[3] = addc64(rr[3], tt[3], c, &c);
 
   // reduce 320bit -> 256bit
   u64 hi, lo;
   lo = umul128(tt[4] + c, 0x1000003D1ULL, &hi);
-  r[0] = __builtin_addcll(rr[0], lo, 0, &c);
-  r[1] = __builtin_addcll(rr[1], hi, c, &c);
-  r[2] = __builtin_addcll(rr[2], 0, c, &c);
-  r[3] = __builtin_addcll(rr[3], 0, c, &c);
+  r[0] = addc64(rr[0], lo, 0, &c);
+  r[1] = addc64(rr[1], hi, c, &c);
+  r[2] = addc64(rr[2], 0, c, &c);
+  r[3] = addc64(rr[3], 0, c, &c);
 
   if (fe_cmp(r, P) >= 0) fe_modsub(r, r, P);
 }
@@ -213,70 +178,70 @@ void fe_modsqr(fe r, const fe a) {
 
   // k=1
   tt[3] = umul128(a[0], a[1], &tt[4]);
-  tt[3] = __builtin_addcll(tt[3], tt[3], 0, &c);
-  tt[4] = __builtin_addcll(tt[4], tt[4], c, &c);
+  tt[3] = addc64(tt[3], tt[3], 0, &c);
+  tt[4] = addc64(tt[4], tt[4], c, &c);
   t1 = c;
-  tt[3] = __builtin_addcll(tt[1], tt[3], 0, &c);
-  tt[4] = __builtin_addcll(tt[4], 0, c, &c);
+  tt[3] = addc64(tt[1], tt[3], 0, &c);
+  tt[4] = addc64(tt[4], 0, c, &c);
   t1 += c;
   rr[1] = tt[3];
 
   // k=2
   tt[0] = umul128(a[0], a[2], &tt[1]);
-  tt[0] = __builtin_addcll(tt[0], tt[0], 0, &c);
-  tt[1] = __builtin_addcll(tt[1], tt[1], c, &c);
+  tt[0] = addc64(tt[0], tt[0], 0, &c);
+  tt[1] = addc64(tt[1], tt[1], c, &c);
   t2 = c;
   lo = umul128(a[1], a[1], &hi);
-  tt[0] = __builtin_addcll(tt[0], lo, 0, &c);
-  tt[1] = __builtin_addcll(tt[1], hi, c, &c);
+  tt[0] = addc64(tt[0], lo, 0, &c);
+  tt[1] = addc64(tt[1], hi, c, &c);
   t2 += c;
-  tt[0] = __builtin_addcll(tt[0], tt[4], 0, &c);
-  tt[1] = __builtin_addcll(tt[1], t1, c, &c);
+  tt[0] = addc64(tt[0], tt[4], 0, &c);
+  tt[1] = addc64(tt[1], t1, c, &c);
   t2 += c;
   rr[2] = tt[0];
 
   // k=3
   tt[3] = umul128(a[0], a[3], &tt[4]);
   lo = umul128(a[1], a[2], &hi);
-  tt[3] = __builtin_addcll(tt[3], lo, 0, &c);
-  tt[4] = __builtin_addcll(tt[4], hi, c, &c);
+  tt[3] = addc64(tt[3], lo, 0, &c);
+  tt[4] = addc64(tt[4], hi, c, &c);
   t1 = c + c;
-  tt[3] = __builtin_addcll(tt[3], tt[3], 0, &c);
-  tt[4] = __builtin_addcll(tt[4], tt[4], c, &c);
+  tt[3] = addc64(tt[3], tt[3], 0, &c);
+  tt[4] = addc64(tt[4], tt[4], c, &c);
   t1 += c;
-  tt[3] = __builtin_addcll(tt[1], tt[3], 0, &c);
-  tt[4] = __builtin_addcll(tt[4], t2, c, &c);
+  tt[3] = addc64(tt[1], tt[3], 0, &c);
+  tt[4] = addc64(tt[4], t2, c, &c);
   t1 += c;
   rr[3] = tt[3];
 
   // k=4
   tt[0] = umul128(a[1], a[3], &tt[1]);
-  tt[0] = __builtin_addcll(tt[0], tt[0], 0, &c);
-  tt[1] = __builtin_addcll(tt[1], tt[1], c, &c);
+  tt[0] = addc64(tt[0], tt[0], 0, &c);
+  tt[1] = addc64(tt[1], tt[1], c, &c);
   t2 = c;
   lo = umul128(a[2], a[2], &hi);
-  tt[0] = __builtin_addcll(tt[0], lo, 0, &c);
-  tt[1] = __builtin_addcll(tt[1], hi, c, &c);
+  tt[0] = addc64(tt[0], lo, 0, &c);
+  tt[1] = addc64(tt[1], hi, c, &c);
   t2 += c;
-  tt[0] = __builtin_addcll(tt[0], tt[4], 0, &c);
-  tt[1] = __builtin_addcll(tt[1], t1, c, &c);
+  tt[0] = addc64(tt[0], tt[4], 0, &c);
+  tt[1] = addc64(tt[1], t1, c, &c);
   t2 += c;
   rr[4] = tt[0];
 
   // k=5
   tt[3] = umul128(a[2], a[3], &tt[4]);
-  tt[3] = __builtin_addcll(tt[3], tt[3], 0, &c);
-  tt[4] = __builtin_addcll(tt[4], tt[4], c, &c);
+  tt[3] = addc64(tt[3], tt[3], 0, &c);
+  tt[4] = addc64(tt[4], tt[4], c, &c);
   t1 = c;
-  tt[3] = __builtin_addcll(tt[3], tt[1], 0, &c);
-  tt[4] = __builtin_addcll(tt[4], t2, c, &c);
+  tt[3] = addc64(tt[3], tt[1], 0, &c);
+  tt[4] = addc64(tt[4], t2, c, &c);
   t1 += c;
   rr[5] = tt[3];
 
   // k=6
   tt[0] = umul128(a[3], a[3], &tt[1]);
-  tt[0] = __builtin_addcll(tt[0], tt[4], 0, &c);
-  tt[1] = __builtin_addcll(tt[1], t1, c, &c);
+  tt[0] = addc64(tt[0], tt[4], 0, &c);
+  tt[1] = addc64(tt[1], t1, c, &c);
   rr[6] = tt[0];
 
   // k=7
@@ -284,17 +249,17 @@ void fe_modsqr(fe r, const fe a) {
 
   // reduce 512bit -> 320bit
   fe_mul_scalar(tt, rr + 4, 0x1000003D1ULL);
-  rr[0] = __builtin_addcll(rr[0], tt[0], 0, &c);
-  rr[1] = __builtin_addcll(rr[1], tt[1], c, &c);
-  rr[2] = __builtin_addcll(rr[2], tt[2], c, &c);
-  rr[3] = __builtin_addcll(rr[3], tt[3], c, &c);
+  rr[0] = addc64(rr[0], tt[0], 0, &c);
+  rr[1] = addc64(rr[1], tt[1], c, &c);
+  rr[2] = addc64(rr[2], tt[2], c, &c);
+  rr[3] = addc64(rr[3], tt[3], c, &c);
 
   // reduce 320bit -> 256bit
   lo = umul128(tt[4] + c, 0x1000003D1ULL, &hi);
-  r[0] = __builtin_addcll(rr[0], lo, 0, &c);
-  r[1] = __builtin_addcll(rr[1], hi, c, &c);
-  r[2] = __builtin_addcll(rr[2], 0, c, &c);
-  r[3] = __builtin_addcll(rr[3], 0, c, &c);
+  r[0] = addc64(rr[0], lo, 0, &c);
+  r[1] = addc64(rr[1], hi, c, &c);
+  r[2] = addc64(rr[2], 0, c, &c);
+  r[3] = addc64(rr[3], 0, c, &c);
 
   if (fe_cmp(r, P) >= 0) fe_modsub(r, r, P);
 }
@@ -467,11 +432,7 @@ static const pe G2 = {
     .z = {0x1, 0x0, 0x0, 0x0},
 };
 
-void pe_clone(pe *r, const pe *a) {
-  fe_clone(r->x, a->x);
-  fe_clone(r->y, a->y);
-  fe_clone(r->z, a->z);
-}
+INLINE void pe_clone(pe *r, const pe *a) { memcpy(r, a, sizeof(pe)); }
 
 // https://en.wikibooks.org/wiki/Cryptography/Prime_Curve/Affine_Coordinates
 
@@ -746,32 +707,18 @@ bool ec_verify(const pe *p) {
 void ec_jacobi_mul(pe *r, const pe *p, const fe k) {
   // double-and-add in Jacobian space
   pe t;
-  fe_clone(t.x, p->x);
-  fe_clone(t.y, p->y);
-  fe_clone(t.z, p->z);
+  pe_clone(&t, p);
   fe_set64(r->x, 0x0);
   fe_set64(r->y, 0x0);
   fe_set64(r->z, 0x1);
 
-  // count significant bits in k
-  u64 bits = 256;
-  for (int i = 3; i >= 0; --i) {
-    if (k[i] == 0) {
-      bits -= 64;
-    } else {
-      bits = 64 * i + (64 - __builtin_clzll(k[i]));
-      break;
-    }
-  }
-
+  u32 bits = fe_bitlen(k);
   for (int i = 0; i < bits; ++i) {
     if (k[i / 64] & (1ULL << (i % 64))) {
       // todo: remove if condition / here simplified check to point of infinity
       if (r->x[0] == 0 && r->y[0] == 0) {
         // printf("add(0): %d ~ %d\n", i, i / 64);
-        fe_clone(r->x, t.x);
-        fe_clone(r->y, t.y);
-        fe_clone(r->z, t.z);
+        pe_clone(r, &t);
       } else {
         // printf("add(1): %d ~ %d\n", i, i / 64);
         ec_jacobi_add(r, r, &t);

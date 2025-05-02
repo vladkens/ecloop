@@ -3,21 +3,7 @@
 // Licensed under the MIT License.
 
 #pragma once
-
-typedef unsigned int u32;
-typedef unsigned char u8;
-
-#if __has_builtin(__builtin_rotateleft32)
-  #define rotl32(x, n) __builtin_rotateleft32(x, n)
-#else
-  #define rotl32(x, n) (((x) << (n)) | ((x) >> (32 - (n))))
-#endif
-
-#if __has_builtin(__builtin_bswap32)
-  #define swap32(x) __builtin_bswap32(x)
-#else
-  #define swap32(x) ((x) << 24) | ((x) << 8 & 0x00ff0000) | ((x) >> 8 & 0x0000ff00) | ((x) >> 24)
-#endif
+#include "compat.c"
 
 static const u8 _n[80] = {
     0, 1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15, //

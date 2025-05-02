@@ -3,6 +3,7 @@
 // Licensed under the MIT License.
 
 #pragma once
+#include "compat.c"
 #include "ecc.c"
 #include "rmd160.c"
 #include "sha256.c"
@@ -30,14 +31,8 @@ void addr33(u32 r[5], const pe *point) {
 
   msg[0] = point->y[0] & 1 ? 0x03 : 0x02;
   for (int i = 0; i < 4; i++) {
-    msg[1 + i * 8] = point->x[3 - i] >> 56;
-    msg[2 + i * 8] = point->x[3 - i] >> 48;
-    msg[3 + i * 8] = point->x[3 - i] >> 40;
-    msg[4 + i * 8] = point->x[3 - i] >> 32;
-    msg[5 + i * 8] = point->x[3 - i] >> 24;
-    msg[6 + i * 8] = point->x[3 - i] >> 16;
-    msg[7 + i * 8] = point->x[3 - i] >> 8;
-    msg[8 + i * 8] = point->x[3 - i];
+    u64 x_be = swap64(point->x[3 - i]);
+    memcpy(&msg[1 + i * 8], &x_be, sizeof(u64));
   }
 
   msg[33] = 0x80;
@@ -57,26 +52,17 @@ void addr65(u32 *r, const pe *point) {
   u32 rs[16] = {0};  // sha256 output and rmd160 input
 
   msg[0] = 0x04;
+
+  // copy point->x into msg[1..33] in big-endian order
   for (int i = 0; i < 4; i++) {
-    msg[1 + i * 8] = point->x[3 - i] >> 56;
-    msg[2 + i * 8] = point->x[3 - i] >> 48;
-    msg[3 + i * 8] = point->x[3 - i] >> 40;
-    msg[4 + i * 8] = point->x[3 - i] >> 32;
-    msg[5 + i * 8] = point->x[3 - i] >> 24;
-    msg[6 + i * 8] = point->x[3 - i] >> 16;
-    msg[7 + i * 8] = point->x[3 - i] >> 8;
-    msg[8 + i * 8] = point->x[3 - i];
+    u64 x_be = swap64(point->x[3 - i]);
+    memcpy(&msg[1 + i * 8], &x_be, sizeof(u64));
   }
 
+  // copy point->y into msg[33..65] in big-endian order
   for (int i = 0; i < 4; i++) {
-    msg[33 + i * 8] = point->y[3 - i] >> 56;
-    msg[34 + i * 8] = point->y[3 - i] >> 48;
-    msg[35 + i * 8] = point->y[3 - i] >> 40;
-    msg[36 + i * 8] = point->y[3 - i] >> 32;
-    msg[37 + i * 8] = point->y[3 - i] >> 24;
-    msg[38 + i * 8] = point->y[3 - i] >> 16;
-    msg[39 + i * 8] = point->y[3 - i] >> 8;
-    msg[40 + i * 8] = point->y[3 - i];
+    u64 y_be = swap64(point->y[3 - i]);
+    memcpy(&msg[33 + i * 8], &y_be, sizeof(u64));
   }
 
   msg[65] = 0x80;

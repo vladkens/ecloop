@@ -3,6 +3,7 @@
 // Licensed under the MIT License.
 
 #pragma once
+#include <assert.h>
 
 #include "addr.c"
 #include "ecc.c"
@@ -16,6 +17,7 @@ void print_res(char *label, u64 stime, u64 iters) {
 void run_bench() {
   ec_gtable_init();
 
+  // note: asserts used to prevent compiler optimization
   u64 stime, iters, i;
   pe g;
   fe f;
@@ -27,21 +29,25 @@ void run_bench() {
   pe_clone(&g, &G2);
   for (i = 0; i < iters; ++i) _ec_jacobi_add1(&g, &g, &G1);
   print_res("_ec_jacobi_add1", stime, iters);
+  assert(fe_cmp(g.x, G1.x) != 0);
 
   pe_clone(&g, &G2);
   stime = tsnow();
   for (i = 0; i < iters; ++i) _ec_jacobi_add2(&g, &g, &G1);
   print_res("_ec_jacobi_add2", stime, iters);
+  assert(fe_cmp(g.x, G1.x) != 0);
 
   pe_clone(&g, &G2);
   stime = tsnow();
   for (i = 0; i < iters; ++i) _ec_jacobi_dbl1(&g, &g);
   print_res("_ec_jacobi_dbl1", stime, iters);
+  assert(fe_cmp(g.x, G1.x) != 0);
 
   pe_clone(&g, &G2);
   stime = tsnow();
   for (i = 0; i < iters; ++i) _ec_jacobi_dbl2(&g, &g);
   print_res("_ec_jacobi_dbl2", stime, iters);
+  assert(fe_cmp(g.x, G1.x) != 0);
 
   // ec multiplication
   srand(42);
@@ -54,11 +60,13 @@ void run_bench() {
   stime = tsnow();
   for (i = 0; i < iters; ++i) ec_jacobi_mul(&g, &G1, numbers[i % numSize]);
   print_res("ec_jacobi_mul", stime, iters);
+  assert(fe_cmp(g.x, G1.x) != 0);
 
   iters = 1000 * 500;
   stime = tsnow();
   for (i = 0; i < iters; ++i) ec_gtable_mul(&g, numbers[i % numSize]);
   print_res("ec_gtable_mul", stime, iters);
+  assert(fe_cmp(g.x, G1.x) != 0);
 
   // affine coordinates
   iters = 1000 * 500;
@@ -67,11 +75,13 @@ void run_bench() {
   stime = tsnow();
   for (i = 0; i < iters; ++i) ec_affine_add(&g, &g, &G1);
   print_res("ec_affine_add", stime, iters);
+  assert(fe_cmp(g.x, G1.x) != 0);
 
   pe_clone(&g, &G2);
   stime = tsnow();
   for (i = 0; i < iters; ++i) ec_affine_dbl(&g, &g);
   print_res("ec_affine_dbl", stime, iters);
+  assert(fe_cmp(g.x, G1.x) != 0);
 
   // modular inversion
   iters = 1000 * 100;
@@ -79,10 +89,12 @@ void run_bench() {
   stime = tsnow();
   for (i = 0; i < iters; ++i) _fe_modinv_binpow(f, g.x);
   print_res("_fe_modinv_binpow", stime, iters);
+  assert(fe_cmp(f, G1.x) != 0);
 
   stime = tsnow();
   for (i = 0; i < iters; ++i) _fe_modinv_addchn(f, g.x);
   print_res("_fe_modinv_addchn", stime, iters);
+  assert(fe_cmp(f, G1.x) != 0);
 
   // hash functions
   iters = 1000 * 1000 * 5;
@@ -127,6 +139,8 @@ void run_bench_gtable() {
 }
 
 void mult_verify() {
+  ec_gtable_init();
+
   pe r1, r2;
   fe pk;
   for (int i = 0; i < 1000 * 16; ++i) {

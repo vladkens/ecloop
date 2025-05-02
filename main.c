@@ -203,7 +203,7 @@ u64 batch_add(ctx_t *ctx, const fe pk, const u64 iterations) {
   u64 found = 0;
 
   fe ck, ss, rx, ry;
-  fe dx[dx_size], di[dx_size]; // can dx_size be used here?
+  fe dx[dx_size], di[dx_size];
   memcpy(ck, pk, sizeof(ck));
 
   pe start_point, check_point;
@@ -517,8 +517,18 @@ void arg_search_range(args_t *args, fe range_s, fe range_e) {
   fe_from_hex(range_s, raw);
   fe_from_hex(range_e, sep + 1);
 
-  if (fe_cmp64(range_s, GROUP_INV_SIZE) < 0) fe_set64(range_s, GROUP_INV_SIZE);
-  if (fe_cmp(range_e, P) > 0) fe_clone(range_e, P);
+  // if (fe_cmp64(range_s, GROUP_INV_SIZE) <= 0) fe_set64(range_s, GROUP_INV_SIZE + 1);
+  // if (fe_cmp(range_e, P) > 0) fe_clone(range_e, P);
+
+  if (fe_cmp64(range_s, GROUP_INV_SIZE) <= 0) {
+    fprintf(stderr, "invalid search range, start <= %#x\n", GROUP_INV_SIZE);
+    exit(1);
+  }
+
+  if (fe_cmp(range_e, P) > 0) {
+    fprintf(stderr, "invalid search range, end > P\n");
+    exit(1);
+  }
 
   if (fe_cmp(range_s, range_e) >= 0) {
     fprintf(stderr, "invalid search range, start >= end\n");
@@ -601,6 +611,7 @@ void init(ctx_t *ctx, args_t *args) {
     if (strcmp(args->argv[1], "blf-gen") == 0) return blf_gen(args);
     if (strcmp(args->argv[1], "bench") == 0) return run_bench();
     if (strcmp(args->argv[1], "bench-gtable") == 0) return run_bench_gtable();
+    if (strcmp(args->argv[1], "mult-verify") == 0) return mult_verify(args);
   }
 
   ctx->cmd = CMD_NIL; // default show help
