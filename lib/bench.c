@@ -97,16 +97,18 @@ void run_bench() {
   assert(fe_cmp(f, G1.x) != 0);
 
   // hash functions
-  iters = 1000 * 1000 * 5;
+  iters = 1000 * 1000 * 10;
   h160_t h160;
 
   stime = tsnow();
   for (i = 0; i < iters; ++i) addr33(h160, &g);
   print_res("addr33", stime, iters);
+  assert(h160[0] != 0);
 
   stime = tsnow();
   for (i = 0; i < iters; ++i) addr65(h160, &g);
   print_res("addr65", stime, iters);
+  assert(h160[0] != 0);
 }
 
 void run_bench_gtable() {
@@ -138,7 +140,7 @@ void run_bench_gtable() {
   }
 }
 
-void mult_verify() {
+void mult_verify(args_t *args) {
   ec_gtable_init();
 
   pe r1, r2;

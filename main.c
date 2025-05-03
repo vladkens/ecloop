@@ -54,15 +54,6 @@ typedef struct ctx_t {
   u32 ord_size; // size (span) in range to search
 } ctx_t;
 
-int get_cpu_count() {
-  int cpu_count = sysconf(_SC_NPROCESSORS_ONLN);
-  if (cpu_count == -1) {
-    perror("sysconf: unable to get CPU count, defaulting to 1");
-    return 1;
-  }
-  return cpu_count;
-}
-
 void load_filter(ctx_t *ctx, const char *filepath) {
   if (!filepath) {
     fprintf(stderr, "missing filter file\n");

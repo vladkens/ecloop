@@ -35,6 +35,15 @@ bool strendswith(const char *str, const char *suffix) {
   return (str_len >= suffix_len) && (strcmp(str + str_len - suffix_len, suffix) == 0);
 }
 
+int get_cpu_count() {
+  int cpu_count = sysconf(_SC_NPROCESSORS_ONLN);
+  if (cpu_count == -1) {
+    perror("sysconf: unable to get CPU count, defaulting to 1");
+    return 1;
+  }
+  return cpu_count;
+}
+
 // MARK: terminal
 
 void term_clear_line() { fprintf(stderr, "\r\033[K"); }
