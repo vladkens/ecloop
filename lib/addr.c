@@ -8,6 +8,9 @@
 #include "rmd160.c"
 #include "sha256.c"
 
+#include "rmd160s.c"
+#define HASH_BATCH_SIZE RMD_LEN
+
 typedef u32 h160_t[5];
 
 int compare_160(const void *a, const void *b) {
@@ -25,10 +28,7 @@ void print_h160(const h160_t h) {
   printf("\n");
 }
 
-void addr33(u32 r[5], const pe *point) {
-  u8 msg[64] = {0}; // sha256 payload
-  u32 rs[16] = {0}; // sha256 output and rmd160 input
-
+void prepare33(u8 msg[64], const pe *point) {
   msg[0] = point->y[0] & 1 ? 0x03 : 0x02;
   for (int i = 0; i < 4; i++) {
     u64 x_be = swap64(point->x[3 - i]);
@@ -38,19 +38,9 @@ void addr33(u32 r[5], const pe *point) {
   msg[33] = 0x80;
   msg[62] = 0x01;
   msg[63] = 0x08;
-  sha256_final(rs, msg, sizeof(msg));
-
-  for (int i = 0; i < 8; i++) rs[i] = swap32(rs[i]);
-  rs[8] = 0x00000080;
-  rs[14] = 256;
-  rs[15] = 0;
-  rmd160_final(r, rs);
 }
 
-void addr65(u32 *r, const pe *point) {
-  u8 msg[128] = {0}; // sha256 payload
-  u32 rs[16] = {0};  // sha256 output and rmd160 input
-
+void prepare65(u8 msg[128], const pe *point) {
   msg[0] = 0x04;
 
   // copy point->x into msg[1..33] in big-endian order
@@ -68,11 +58,61 @@ void addr65(u32 *r, const pe *point) {
   msg[65] = 0x80;
   msg[126] = 0x02;
   msg[127] = 0x08;
-  sha256_final(rs, msg, sizeof(msg));
+}
 
-  for (int i = 0; i < 0x8; i++) rs[i] = swap32(rs[i]);
+void prepare_rmd(u32 rs[16]) {
+  for (int i = 0; i < 8; i++) rs[i] = swap32(rs[i]);
   rs[8] = 0x00000080;
   rs[14] = 256;
   rs[15] = 0;
+}
+
+void addr33(u32 r[5], const pe *point) {
+  u8 msg[64] = {0}; // sha256 payload
+  u32 rs[16] = {0}; // sha256 output and rmd160 input
+
+  prepare33(msg, point);
+  sha256_final(rs, msg, sizeof(msg));
+
+  prepare_rmd(rs);
   rmd160_final(r, rs);
+}
+
+void addr65(u32 *r, const pe *point) {
+  u8 msg[128] = {0}; // sha256 payload
+  u32 rs[16] = {0};  // sha256 output and rmd160 input
+
+  prepare65(msg, point);
+  sha256_final(rs, msg, sizeof(msg));
+
+  prepare_rmd(rs);
+  rmd160_final(r, rs);
+}
+
+void addr33_batch(h160_t *hashes, const pe *points, size_t count) {
+  assert(count <= HASH_BATCH_SIZE);
+  u8 msg[HASH_BATCH_SIZE][64] = {0}; // sha256 payload
+  u32 rs[HASH_BATCH_SIZE][16] = {0}; // sha256 output and rmd160 input
+
+  for (size_t i = 0; i < count; ++i) {
+    prepare33(msg[i], points + i);
+    sha256_final(rs[i], msg[i], sizeof(msg[i]));
+  };
+
+  for (size_t i = 0; i < count; ++i) prepare_rmd(rs[i]);
+  rmd160_batch(hashes, rs);
+}
+
+void addr65_batch(h160_t *hashes, const pe *points, size_t count) {
+  assert(count <= HASH_BATCH_SIZE);
+  u8 msg[HASH_BATCH_SIZE][128] = {0}; // sha256 payload
+  u32 rs[HASH_BATCH_SIZE][16] = {0};  // sha256 output and rmd160 input
+
+  for (size_t i = 0; i < count; ++i) {
+    prepare33(msg[i], points + i);
+    sha256_final(rs[i], msg[i], sizeof(msg[i]));
+  };
+
+  for (size_t i = 0; i < count; ++i) prepare_rmd(rs[i]);
+  rmd160_batch(hashes, rs);
 }

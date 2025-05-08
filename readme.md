@@ -10,7 +10,8 @@ A high-performance, CPU-optimized tool for computing public keys on the secp256k
 - 🔄 Group inversion for point addition operation
 - 🍇 Precomputed table for points multiplication
 - 🔍 Search for compressed & uncompressed public keys (hash160)
-- 🌟 Utilizes SIMD for optimized sha256 (uses SHA extensions, both ARM and Intel)
+- 🌟 Utilizes SHA extensions for optimized sha256 (both ARM and Intel)
+- 🚀 Accelerated RIPEMD-160 using SIMD (NEON for ARM, AVX2 for Intel)
 - 🎲 Random search within customizable bit ranges
 - 🍎 Works seamlessly on MacOS and Linux
 - 🔧 Customizable search range and thread count for flexible usage

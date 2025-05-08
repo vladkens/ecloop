@@ -2,6 +2,7 @@
 // https://github.com/vladkens/ecloop
 // Licensed under the MIT License.
 
+#include <assert.h>
 #include <locale.h>
 #include <stdbool.h>
 #include <string.h>
@@ -15,6 +16,9 @@
 #define MAX_JOB_SIZE 1024 * 1024 * 2
 #define GROUP_INV_SIZE 1024
 #define MAX_LINE_SIZE 128
+
+static_assert(GROUP_INV_SIZE % HASH_BATCH_SIZE == 0,
+              "GROUP_INV_SIZE must be divisible by HASH_BATCH_SIZE");
 
 enum Cmd { CMD_NIL, CMD_ADD, CMD_MUL, CMD_RND };
 
@@ -189,6 +193,41 @@ void ctx_precompute_gpoints(ctx_t *ctx) {
 
 // MARK: CMD_ADD
 
+u64 check_found_add(ctx_t *ctx, fe ck, const pe *points) {
+  h160_t hashes[HASH_BATCH_SIZE];
+  u64 found = 0;
+
+  if (ctx->check_addr33) {
+    for (size_t i = 0; i < GROUP_INV_SIZE; i += HASH_BATCH_SIZE) {
+      addr33_batch(hashes, points + i, HASH_BATCH_SIZE);
+      for (size_t j = 0; j < HASH_BATCH_SIZE; ++j) {
+        fe_modadd(ck, ck, ctx->gs);
+        if (ctx_check_hash(ctx, hashes[j])) {
+          ctx_write_found(ctx, "addr33", hashes[j], ck);
+          ctx_print_status(ctx, false);
+          found += 1;
+        }
+      }
+    }
+  }
+
+  if (ctx->check_addr65) {
+    for (size_t i = 0; i < GROUP_INV_SIZE; i += HASH_BATCH_SIZE) {
+      addr65_batch(hashes, points + i, HASH_BATCH_SIZE);
+      for (size_t j = 0; j < HASH_BATCH_SIZE; ++j) {
+        fe_modadd(ck, ck, ctx->gs);
+        if (ctx_check_hash(ctx, hashes[j])) {
+          ctx_write_found(ctx, "addr65", hashes[j], ck);
+          ctx_print_status(ctx, false);
+          found += 1;
+        }
+      }
+    }
+  }
+
+  return found;
+}
+
 u64 batch_add(ctx_t *ctx, const fe pk, const u64 iterations) {
   u64 dx_size = MIN(GROUP_INV_SIZE, iterations);
   u64 found = 0;
@@ -198,7 +237,7 @@ u64 batch_add(ctx_t *ctx, const fe pk, const u64 iterations) {
   memcpy(ck, pk, sizeof(ck));
 
   pe start_point, check_point;
-  pe *bp = malloc(dx_size * sizeof(pe));
+  pe bp[dx_size];
   ec_jacobi_mul(&start_point, &G1, ck);
   ec_jacobi_rdc(&start_point, &start_point);
   memcpy(&check_point, &start_point, sizeof(pe));
@@ -235,16 +274,12 @@ u64 batch_add(ctx_t *ctx, const fe pk, const u64 iterations) {
       // }
     }
 
-    for (u64 i = 0; i < dx_size; ++i) {
-      fe_modadd(ck, ck, ctx->gs);
-      if (ctx_check_found(ctx, &bp[i], ck)) found += 1;
-    }
+    found += check_found_add(ctx, ck, bp);
 
     memcpy(&start_point, &bp[dx_size - 1], sizeof(pe));
     counter += dx_size;
   }
 
-  free(bp);
   return found;
 }
 
