@@ -4,8 +4,11 @@
 
 #include <assert.h>
 #include <locale.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <string.h>
+#include <termios.h>
+#include <unistd.h>
 
 #include "lib/addr.c"
 #include "lib/bench.c"
@@ -32,6 +35,7 @@ typedef struct ctx_t {
   size_t stime;
   bool check_addr33;
   bool check_addr65;
+  bool use_color;
 
   FILE *outfile;
   bool quiet;
@@ -109,10 +113,8 @@ void ctx_print_status(ctx_t *ctx, bool final) {
   term_clear_line();
   fprintf(stderr, "%.2fs ~ %.2f Mkeys/s ~ %'llu / %'llu%c", //
           dt, it, ctx->k_found, ctx->k_checked, final ? '\n' : '\r');
-  pthread_mutex_unlock(&ctx->lock);
-
-  fflush(stdout);
   fflush(stderr);
+  pthread_mutex_unlock(&ctx->lock);
 }
 
 void ctx_write_found(ctx_t *ctx, const char *label, const h160_t hash, const fe pk) {
@@ -458,7 +460,7 @@ void gen_random_range(ctx_t *ctx, const fe a, const fe b) {
   }
 }
 
-void print_range_mask(fe range_s, u32 bits_size, u32 offset) {
+void print_range_mask(fe range_s, u32 bits_size, u32 offset, bool use_color) {
   int mask_e = 255 - offset;
   int mask_s = mask_e - bits_size + 1;
 
@@ -473,9 +475,9 @@ void print_range_mask(fe range_s, u32 bits_size, u32 offset) {
 
     bool flag = (bits_s >= mask_s && bits_s <= mask_e) || (bits_e >= mask_s && bits_e <= mask_e);
     if (flag) {
-      term_color_yellow();
+      if (use_color) fputs(COLOR_YELLOW, stdout);
       putchar(cc);
-      term_color_reset();
+      if (use_color) fputs(COLOR_RESET, stdout);
     } else {
       putchar(cc);
     }
@@ -502,8 +504,8 @@ int cmd_rnd(ctx_t *ctx) {
     s_time = tsnow();
 
     gen_random_range(ctx, range_s, range_e);
-    print_range_mask(ctx->range_s, ctx->ord_size, ctx->ord_offs);
-    print_range_mask(ctx->range_e, ctx->ord_size, ctx->ord_offs);
+    print_range_mask(ctx->range_s, ctx->ord_size, ctx->ord_offs, ctx->use_color);
+    print_range_mask(ctx->range_e, ctx->ord_size, ctx->ord_offs, ctx->use_color);
     ctx_print_status(ctx, false);
 
     for (size_t i = 0; i < ctx->threads_count; ++i) {
@@ -641,6 +643,8 @@ void init(ctx_t *ctx, args_t *args) {
     if (strcmp(args->argv[1], "blf-check") == 0) return blf_check(args);
   }
 
+  ctx->use_color = isatty(fileno(stdout));
+
   ctx->cmd = CMD_NIL; // default show help
   if (args->argc > 1) {
     if (strcmp(args->argv[1], "add") == 0) ctx->cmd = CMD_ADD;
@@ -713,9 +717,28 @@ void init(ctx_t *ctx, args_t *args) {
   printf("----------------------------------------\n");
 }
 
+void disable_echoctl() {
+  struct termios t;
+  if (tcgetattr(STDIN_FILENO, &t) == 0) {
+    t.c_lflag &= ~ECHOCTL; // Disable ^C echo
+    tcsetattr(STDIN_FILENO, TCSANOW, &t);
+  }
+}
+
+void handle_sigint(int sig) {
+  fflush(stderr);
+  fflush(stdout);
+  printf("\n");
+  exit(sig);
+}
+
 int main(int argc, const char **argv) {
   // https://stackoverflow.com/a/11695246
   setlocale(LC_NUMERIC, ""); // for comma separated numbers
+
+  // Keep last progress line on Ctrl-C
+  signal(SIGINT, handle_sigint);
+  disable_echoctl();
 
   args_t args = {argc, argv};
 

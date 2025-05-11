@@ -20,6 +20,18 @@ typedef char hex40[41]; // rmd160 hex string
 typedef char hex64[65]; // sha256 hex string
 typedef u32 h160_t[5];
 
+// Mark: Terminal
+
+#define COLOR_YELLOW "\033[33m"
+#define COLOR_RESET "\033[0m"
+
+void term_clear_line() {
+  fprintf(stderr, "\033[2K\r");
+  // in case if ecloop will be piped
+  fflush(stdout);
+  fflush(stderr);
+}
+
 // MARK: helpers
 
 u64 tsnow() {
@@ -57,23 +69,6 @@ int get_cpu_count() {
     return 1;
   }
   return cpu_count;
-}
-
-// MARK: terminal
-
-void term_clear_line() { fprintf(stderr, "\r\033[K"); }
-
-void term_color_yellow() {
-  // todo: use isatty
-  fflush(stdout);
-  fprintf(stderr, "\033[33m"); // yellow
-  fflush(stderr);
-}
-
-void term_color_reset() {
-  fflush(stdout);
-  fprintf(stderr, "\033[0m"); // reset
-  fflush(stderr);
 }
 
 // MARK: random helpers
