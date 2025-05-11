@@ -638,6 +638,7 @@ void init(ctx_t *ctx, args_t *args) {
     if (strcmp(args->argv[1], "bench") == 0) return run_bench();
     if (strcmp(args->argv[1], "bench-gtable") == 0) return run_bench_gtable();
     if (strcmp(args->argv[1], "mult-verify") == 0) return mult_verify(args);
+    if (strcmp(args->argv[1], "blf-check") == 0) return blf_check(args);
   }
 
   ctx->cmd = CMD_NIL; // default show help

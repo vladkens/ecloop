@@ -35,6 +35,21 @@ bool strendswith(const char *str, const char *suffix) {
   return (str_len >= suffix_len) && (strcmp(str + str_len - suffix_len, suffix) == 0);
 }
 
+char *strtrim(char *str) {
+  if (str == NULL) return NULL;
+
+  char *since = str;
+  while (isspace((unsigned char)*since)) ++since;
+
+  char *until = str + strlen(str) - 1;
+  while (until > since && isspace((unsigned char)*until)) --until;
+
+  *(until + 1) = '\0';
+  if (since != until) memmove(str, since, until - since + 2);
+
+  return str;
+}
+
 int get_cpu_count() {
   int cpu_count = sysconf(_SC_NPROCESSORS_ONLN);
   if (cpu_count == -1) {
@@ -387,6 +402,8 @@ bool blf_load(const char *filepath, blf_t *blf) {
   return true;
 }
 
+// MARK: blf-gen command
+
 void __blf_gen_usage(args_t *args) {
   printf("Usage: %s blf-gen -n <count> -o <file>\n", args->argv[0]);
   printf("Generate a bloom filter from a list of hex-encoded hash160 values passed to stdin.\n");
@@ -422,18 +439,18 @@ void blf_gen(args_t *args) {
     printf("file %s already exists; loading...\n", filepath);
 
     if (!blf_load(filepath, &blf)) {
-      fprintf(stderr, "failed to load the bloom filter: %s\n", todo);
+      fprintf(stderr, "[!] failed to load bloom filter: %s\n", todo);
       exit(1);
     }
 
     if (blf.size != size) {
-      fprintf(stderr, "bloom filter size mismatch (%'zu != %'zu): %s\n", blf.size, size, todo);
+      fprintf(stderr, "[!] bloom filter size mismatch (%'zu != %'zu): %s\n", blf.size, size, todo);
       exit(1);
     }
 
-    printf("updating bloom filter...");
+    printf("updating bloom filter...\n");
   } else {
-    printf("creating bloom filter...");
+    printf("creating bloom filter...\n");
     blf.size = size;
     blf.bits = calloc(blf.size, sizeof(u64));
   }
@@ -446,9 +463,7 @@ void blf_gen(args_t *args) {
     if (strlen(line) != sizeof(line) - 1) continue;
 
     h160_t hash;
-    for (size_t j = 0; j < sizeof(line) - 1; j += 8) {
-      sscanf(line + j, "%8x", &hash[j / 8]);
-    }
+    for (size_t j = 0; j < sizeof(line) - 1; j += 8) sscanf(line + j, "%8x", &hash[j / 8]);
 
     count += 1;
     blf_add(&blf, hash);
@@ -457,9 +472,63 @@ void blf_gen(args_t *args) {
   printf("added %'llu items; saving to %s\n", count, filepath);
 
   if (!blf_save(filepath, &blf)) {
-    fprintf(stderr, "failed to save bloom filter\n");
+    fprintf(stderr, "[!] failed to save bloom filter\n");
     exit(1);
   }
 
   free(blf.bits);
+}
+
+// MARK: blf-check command
+
+void __blf_check_usage(args_t *args) {
+  printf("Usage: %s blf-check -f <file> <hash> [hash...]\n", args->argv[0]);
+  printf("Check if one or more hex-encoded hash160 values are in the bloom filter.\n");
+  printf("\nOptions:\n");
+  printf("  -f <file>       Path to the bloom filter file (required).\n");
+  printf("\nArguments:\n");
+  printf("  <hash>          One or more hex-encoded hash160 values to check.\n");
+  printf("                  If no arguments are provided, stdin will be used as source.\n");
+  exit(1);
+}
+
+bool __blf_check_hex(blf_t *blf, const char *hex) {
+  h160_t h = {0};
+  for (size_t i = 0; i < 40; i += 8) sscanf(hex + i, "%8x", &h[i / 8]);
+  return blf_has(blf, h);
+}
+
+void blf_check(args_t *args) {
+  char *filepath = arg_str(args, "-f");
+  if (filepath == NULL) {
+    fprintf(stderr, "[!] missing input file (-f <file>)\n");
+    return __blf_check_usage(args);
+  }
+
+  blf_t blf = {.size = 0, .bits = NULL};
+  if (!blf_load(filepath, &blf)) {
+    fprintf(stderr, "[!] failed to load bloom filter\n");
+    exit(1);
+  }
+
+  bool has_opts = false;
+  for (int i = 1; i < args->argc; ++i) {
+    if (strlen(args->argv[i]) != 40) continue;
+
+    has_opts = true;
+    bool found = __blf_check_hex(&blf, args->argv[i]);
+    printf("%s %s\n", args->argv[i], found ? "FOUND" : "NOT FOUND");
+  }
+
+  if (has_opts) return;
+
+  char line[128];
+  while (fgets(line, sizeof(line), stdin) != NULL) {
+    strtrim(line);
+    // printf("checking %s (%'zu)...\n", line, strlen(line));
+    if (strlen(line) != 40) continue; // 40 hex chars + \n
+
+    bool found = __blf_check_hex(&blf, line);
+    printf("%s %s\n", line, found ? "FOUND" : "NOT FOUND");
+  }
 }
