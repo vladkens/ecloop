@@ -1,7 +1,7 @@
 .PHONY: default clean build bench fmt add mul rnd blf remote
 
 CC = cc
-CC_FLAGS ?= -O3
+CC_FLAGS ?= -O3 -ffast-math
 
 ifeq ($(shell uname -m),x86_64)
 	CC_FLAGS += -march=native -pthread -lpthread
@@ -23,8 +23,6 @@ fmt:
 
 # -----------------------------------------------------------------------------
 
-n = 1024
-
 add: build
 	./ecloop add -f data/btc-puzzles-hash -r 8000:ffffff
 
@@ -35,8 +33,15 @@ rnd: build
 	./ecloop rnd -f data/btc-puzzles-hash -r 100000000:ffffffffffffffffffffffff
 
 blf: build
-	rm -rf /tmp/test.blf; cat data/btc-puzzles-hash | ./ecloop blf-gen -n $(n) -o /tmp/test.blf
-	./ecloop add -f /tmp/test.blf -t 1 -r 8000:ffffff -q -o /dev/null
+	@rm -rf /tmp/test.blf
+	@printf "\n> "
+	cat data/btc-puzzles-hash | ./ecloop blf-gen -n 32768 -o /tmp/test.blf
+	@printf "\n> "
+	cat data/btc-bw-hash | ./ecloop blf-gen -n 32768 -o /tmp/test.blf
+	@printf "\n> "
+	./ecloop add -f /tmp/test.blf -r 8000:ffffff -q -o /dev/null
+	@printf "\n> "
+	cat data/btc-bw-priv | ./ecloop mul -f /tmp/test.blf -a cu -q -o /dev/null
 
 verify: build
 	./ecloop mult-verify

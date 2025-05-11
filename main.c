@@ -107,7 +107,7 @@ void ctx_print_status(ctx_t *ctx, bool final) {
   double dt = (tsnow() - ctx->stime) / 1000.0;
   double it = ctx->k_checked / dt / 1000000;
   term_clear_line();
-  fprintf(stderr, "%.2fs ~ %.2fM it/s ~ %'llu / %'llu%c", //
+  fprintf(stderr, "%.2fs ~ %.2f Mkeys/s ~ %'llu / %'llu%c", //
           dt, it, ctx->k_found, ctx->k_checked, final ? '\n' : '\r');
   pthread_mutex_unlock(&ctx->lock);
 

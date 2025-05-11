@@ -409,18 +409,36 @@ void blf_gen(args_t *args) {
     return __blf_gen_usage(args);
   }
 
-  blf_t blf = {.size = 0, .bits = NULL};
-  if (access(filepath, F_OK) == 0) blf_load(filepath, &blf);
-
   // https://hur.st/bloomfilter/?n=500M&p=1e9&m=&k=20
   u64 r = 1e9;
   double p = 1.0 / (double)r;
   u64 m = (u64)(n * log(p) / log(1.0 / pow(2.0, log(2.0))));
   double mb = (double)m / 8 / 1024 / 1024;
-  printf("creating bloom filter: n = %'llu | p = 1:%'llu | m = %'llu (%'.1f MB)\n", n, r, m, mb);
+  size_t size = (m + 63) / 64;
 
-  blf.size = (m + 63) / 64;
-  blf.bits = calloc(blf.size, sizeof(u64));
+  blf_t blf = {.size = 0, .bits = NULL};
+  if (access(filepath, F_OK) == 0) {
+    char *todo = "delete it or choose a different file";
+    printf("file %s already exists; loading...\n", filepath);
+
+    if (!blf_load(filepath, &blf)) {
+      fprintf(stderr, "failed to load the bloom filter: %s\n", todo);
+      exit(1);
+    }
+
+    if (blf.size != size) {
+      fprintf(stderr, "bloom filter size mismatch (%'zu != %'zu): %s\n", blf.size, size, todo);
+      exit(1);
+    }
+
+    printf("updating bloom filter...");
+  } else {
+    printf("creating bloom filter...");
+    blf.size = size;
+    blf.bits = calloc(blf.size, sizeof(u64));
+  }
+
+  printf("bloom filter params: n = %'llu | p = 1:%'llu | m = %'llu (%'.1f MB)\n", n, r, m, mb);
 
   u64 count = 0;
   hex40 line;

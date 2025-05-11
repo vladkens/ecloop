@@ -4,3 +4,4 @@ misc-*/
 *.out
 ecloop
 _*.txt
+*.blf

@@ -1,19 +1,19 @@
 # ecloop
 
-A high-performance, CPU-optimized tool for computing public keys on the secp256k1 elliptic curve, with features for searching compressed & uncompressed public keys and customizable search parameters.
+A high-performance, CPU-optimized tool for computing public keys on the secp256k1 elliptic curve. It includes features for searching both compressed and uncompressed public keys, with customizable search parameters.
 
 [<img src="https://badges.ws/badge/-/buy%20me%20a%20coffee/ff813f?icon=buymeacoffee&label" alt="donate" />](https://buymeacoffee.com/vladkens)
 
 ## Features
 
 - 🍏 Fixed 256-bit modular arithmetic
-- 🔄 Group inversion for point addition operation
-- 🍇 Precomputed table for points multiplication
-- 🔍 Search for compressed & uncompressed public keys (hash160)
-- 🌟 Utilizes SHA extensions for optimized sha256 (both ARM and Intel)
-- 🚀 Accelerated RIPEMD-160 using SIMD (NEON for ARM, AVX2 for Intel)
+- 🔄 Group inversion for point addition operations
+- 🍇 Precomputed tables for point multiplication
+- 🔍 Search for compressed and uncompressed public keys (hash160)
+- 🌟 Accelerated SHA-256 with SHA extension (both ARM and x86)
+- 🚀 Accelerated RIPEMD-160 using SIMD (NEON for ARM, AVX2 for x86)
 - 🎲 Random search within customizable bit ranges
-- 🍎 Works seamlessly on MacOS and Linux
+- 🍎 Works seamlessly on macOS and Linux
 - 🔧 Customizable search range and thread count for flexible usage
 
 ## Build
@@ -23,11 +23,13 @@ git clone https://github.com/vladkens/ecloop.git && cd ecloop
 make build
 ```
 
-_Note: By default, `cc` will be used as the compiler. Using `clang` may produce [faster code](https://github.com/vladkens/ecloop/issues/7) than `gcc`._
+_Note: By default, `cc` is used as the compiler. Using `clang` may produce [faster code](https://github.com/vladkens/ecloop/issues/7) than `gcc`._
 
-The compiler can be specified explicitly for any `make` command with the `CC` parameter, for example: `make add CC=clang`.
+_Note 2: On macOS, you may need to run `xcode-select --install` first._
 
-Also, verify correctness with the following commands (some compiler versions may have issues with built-ins, which are used in the code):
+You can explicitly specify the compiler for any `make` command using the `CC` parameter. For example: `make add CC=clang`.
+
+Also, verify correctness with the following commands (some compiler versions may have issues with built-ins used in the code):
 
 ```sh
 make add # should found 9 keys
@@ -58,23 +60,30 @@ Other commands:
   bench-gtable    - run benchmark of ecc multiplication (with different table size)
 ```
 
-### Check keys in given range (sequential addition)
-
-`-f` is filter file with hash160 to search. Can be list of hex encoded hashes (one per line) or bloom fitler (must have `.blf` extension). `-t` use 4 threads. `r` – start:end of search range. `-o` file where found keys should be saved (if not provided `stdout` fill be used). No `-a` option provided, so `c` (compressed) hash160 will be checked.
+### Check keys in a given range (sequential addition)
 
 ```sh
 ./ecloop add -f data/btc-puzzles-hash -t 4 -r 800000:ffffff -o /tmp/found.txt
 ```
 
-### Check given privkeys list (multiply)
+- `-f` is a filter file with hash160 values to search for. It can be a list of hex-encoded hashes (one per line) or a Bloom filter (must have a `.blf` extension).
+- `-t` sets the number of threads (e.g., 4).
+- `r` defines the start:end of the search range.
+- `-o` specifies the file where found keys will be saved (if not provided, `stdout` will be used).
+- No `-a` option is provided, so only `c` (compressed) hash160 values will be checked.
 
-`cat privkeys.txt` – source of HEX encoded priv keys to search (can be file or generator program). `-f` – hash160 to search as bloom filter (can have false positive results, but has a much smaller size; eg. all BTC addresses ever used have size ~6GB). `-a` – what type of hash160 to search (`c` – compressed, `u` – uncopressed, `cu` check both). `-t` use 8 threads.
+### Check a given list of keys (multiplication)
 
 ```sh
 cat privkeys.txt | ./ecloop mul -f data/btc-puzzles.blf -a cu -t 4
 ```
 
-`ecloop` can also take a raw word list and automatically hash it with sha256. Use `-raw` flag to it.
+- `cat privkeys.txt` – the source of HEX-encoded private keys to search (can be a file or a generator program).
+- `-f` – a Bloom filter containing hash160 values to search for (may produce false positives but has a much smaller size; for example, all BTC addresses ever used take up ~6 GB).
+- `-a` – specifies which type of hash160 to search: `c` for compressed, `u` for uncompressed, `cu` to check both.
+- `-t` – sets the number of threads (e.g., 4).
+
+`ecloop` can also take a raw word list and automatically hash each word with SHA-256. Use the `-raw` flag to enable this:
 
 ```sh
 cat wordlist.txt | ./ecloop mul -f data/btc-puzzles.blf -a cu -t 4 -raw
@@ -82,7 +91,7 @@ cat wordlist.txt | ./ecloop mul -f data/btc-puzzles.blf -a cu -t 4 -raw
 
 ### Random Search
 
-The `rnd` command allows you to search random ranges of bits within a given range (by default, the entire curve space). This mode is useful for exploring random subsets of the keyspace.
+The `rnd` command allows you to search random bit ranges within a specified range (by default, the entire curve space). This mode is useful for exploring random subsets of the keyspace.
 
 #### Example 1: Random Search with Default Offset and Size
 
@@ -92,7 +101,7 @@ The `rnd` command allows you to search random ranges of bits within a given rang
 
 This command performs a random search across the entire keyspace, checking both compressed and uncompressed addresses (`-a cu`), and saves the results to `found.txt`. Quiet mode is enabled (`-q`).
 
-Random bits offset will be used with a 32-bit range per iteration (4.2M keys).
+A random bit offset will be used, with a 32-bit range per iteration (4.2M keys).
 
 #### Example 2: Random Search with Custom Offset and Size
 
@@ -100,26 +109,30 @@ Random bits offset will be used with a 32-bit range per iteration (4.2M keys).
 ./ecloop rnd -f data/btc-puzzles-hash -d 128:32
 ```
 
-This command searches a 32-bit range with 128-bit offset (`-d 128:32`). It will execute a search with a random base key on each large iteration. Bits from `offset` to `offset + size` will be dynamic. For example (X is dynamic bits, other bits are randomly generated on large iterations):
+This command searches a 32-bit range with a 128-bit offset (`-d 128:32`). It will execute a search with a random base key on each large iteration. Bits from `offset` to `offset + size` will be dynamic. For example:
 
 ```txt
 iter1: d33abfe4b9152c08 7176d067XXXXXXXX 27d4419e6969a205 4d1deb10e4929621
 iter2: 1b354d3094405c2f bf8f5c15XXXXXXXX 46804248255476e9 800f26edd71ad0d7
 ```
 
+X represents dynamic bits; other bits are randomly generated during large iterations.
+
 _Note: You can also combine random search with `-r` param for shorter ranges._
 
 ### Generating bloom filter
-
-`cat` reads the list of hex-encoded hash160 values from a file. `-n` specifies the number of entries for the Bloom filter (count of hashes). `-o` defines the output where to write filter (`.blf` extension requried).
-
-Bloom filter uses p = 0.000001 (1 in 1,000,000 false positive). You can adjusting this option by playing with `n`. See [Bloom Filter Calculator](https://hur.st/bloomfilter/?n=1024&p=0.000001&m=&k=20). List of all addressed can be found [here](https://bitcointalk.org/index.php?topic=5265993.0).
 
 ```sh
 cat data/btc-puzzles-hash | ./ecloop blf-gen -n 1024 -o /tmp/test.blf
 ```
 
-Then created bloom filter can be used in `ecloop` as filter:
+- `cat` reads the list of hex-encoded hash160 values from a file.
+- `-n` specifies the number of entries for the Bloom filter (the number of hashes).
+- `-o` defines the output file where the filter will be written (the `.blf` extension is required).
+
+The Bloom filter uses p = 0.000001 (1 in 1,000,000 false positives). You can adjust this option by modifying `n`. See the [Bloom Filter Calculator](https://hur.st/bloomfilter/?n=1024&p=0.000001&m=&k=20). A list of all addresses can be found [here](https://bitcointalk.org/index.php?topic=5265993.0).
+
+Created Bloom filter then can be used in `ecloop` as a filter:
 
 ```sh
 ./ecloop add -f /tmp/test.blf -t 4 -r 8000:ffffff
@@ -129,13 +142,13 @@ _Note: Bloom filter works with all search commands (`add`, `mul`, `rnd`)._
 
 ## Benchmark
 
-Get performance of different function for single thread:
+Get the performance of different functions for a single thread:
 
 ```sh
 ./ecloop bench
 ```
 
-Should print output like:
+Should print output like this:
 
 ```sh
      _ec_jacobi_add1: 6.70M it/s ~ 0.90s
@@ -152,26 +165,50 @@ Should print output like:
               addr65: 4.27M it/s ~ 1.17s
 ```
 
-_Note: Benchmark is run on a MacBook Pro M2._
+_Note: This benchmark is run on a MacBook Pro M2._
 
 ## Build on Windows with WSL
 
-I just leave here all steps I do to run `ecloop` on Windows.
+Here are the steps I followed to run `ecloop` on Windows:
 
-1. Open PowerShell
-2. `wsl --install`
-3. Restart Windows
-4. `wsl --install Ubuntu` (not sure it required, Ubuntu should be installed by default and this command hung when I tried it, so I continued in new tab)
-5. `wsl -d Ubuntu`
-6. `apt update && apt install build-essential git`
-7. `git clone https://github.com/vladkens/ecloop.git && cd ecloop`
-8. `make build`
+1. Open PowerShell.
+2. Run `wsl --install`.
+3. Restart Windows.
+4. Run `wsl --install Ubuntu` (this may not be necessary, as Ubuntu should be installed by default; this command hung when I tried it, so I continued in a new tab).
+5. Run `wsl -d Ubuntu`.
+6. Run `apt update && apt install build-essential git`.
+7. Run `git clone https://github.com/vladkens/ecloop.git && cd ecloop`.
+8. Run `make build`.
 
 If no errors appear, `ecloop` has been compiled successfully and is ready to use. For example, you can run a benchmark with: `./ecloop bench`.
 
+## Performance compare
+
+Tests were done on an Intel N100.
+
+### Single thread
+
+```sh
+> time ./keyhunt -m rmd160 -f ../ecloop/data/btc-puzzles-hash -r 8000:fffffff -t 1 -n 16777216
+3m57s ~ 1.13 MKeys/s
+
+> time ./ecloop add -f data/btc-puzzles-hash -t 1 -r 8000:fffffff
+1m27s ~ 3.08 MKeys/s
+```
+
+### Multiple threads
+
+```sh
+> time ./keyhunt -m rmd160 -f ../ecloop/data/btc-puzzles-hash -r 8000:fffffff -t 4 -n 16777216
+1m33s ~ 3.88 MKeys/s
+
+> time ./ecloop add -f data/btc-puzzles-hash -t 4 -r 8000:fffffff
+0m33s ~ 8.13 MKeys/s
+```
+
 ## Disclaimer
 
-This project is written to learn the math over elliptic curves in cryptocurrencies. Functionality as a search for Bitcoin Puzzles is added as a real-world use case.
+This project was created to explore the mathematics behind elliptic curves in cryptocurrencies. The functionality for searching Bitcoin Puzzles was added as a real-world use case.
 
 ## Donations
 
@@ -191,6 +228,7 @@ Thank you for your support!
 
 ## See also
 
+- Articles about ecloop in [my blog](https://vladkens.cc/tags/ecloop/)
 - [ryancdotorg/brainflayer](https://github.com/ryancdotorg/brainflayer)
 - [albertobsd/keyhunt](https://github.com/albertobsd/keyhunt)
 - [JeanLucPons/VanitySearch](https://github.com/JeanLucPons/VanitySearch)

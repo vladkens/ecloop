@@ -12,7 +12,7 @@ def run(cmd: str | list[str]):
 
 
 def parse_final(out: str):
-    out = [x for x in out.split("\n") if "it/s ~" in x][-1]
+    out = [x for x in out.split("\n") if "Mkeys/s ~" in x][-1]
     return out.split(" ~ ")[-1].replace(",", "").strip()
 
 
