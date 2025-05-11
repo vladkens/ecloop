@@ -3,14 +3,15 @@
 // Licensed under the MIT License.
 
 #pragma once
+#include <assert.h>
+
 #include "compat.c"
 #include "ecc.c"
 #include "rmd160.c"
+#include "rmd160s.c"
 #include "sha256.c"
 
-#include "rmd160s.c"
 #define HASH_BATCH_SIZE RMD_LEN
-
 typedef u32 h160_t[5];
 
 int compare_160(const void *a, const void *b) {
@@ -29,6 +30,8 @@ void print_h160(const h160_t h) {
 }
 
 void prepare33(u8 msg[64], const pe *point) {
+  assert(*point->z == 1); // point should be in affine coordinates
+
   msg[0] = point->y[0] & 1 ? 0x03 : 0x02;
   for (int i = 0; i < 4; i++) {
     u64 x_be = swap64(point->x[3 - i]);
@@ -41,6 +44,8 @@ void prepare33(u8 msg[64], const pe *point) {
 }
 
 void prepare65(u8 msg[128], const pe *point) {
+  assert(*point->z == 1); // point should be in affine coordinates
+
   msg[0] = 0x04;
 
   // copy point->x into msg[1..33] in big-endian order
@@ -94,10 +99,8 @@ void addr33_batch(h160_t *hashes, const pe *points, size_t count) {
   u8 msg[HASH_BATCH_SIZE][64] = {0}; // sha256 payload
   u32 rs[HASH_BATCH_SIZE][16] = {0}; // sha256 output and rmd160 input
 
-  for (size_t i = 0; i < count; ++i) {
-    prepare33(msg[i], points + i);
-    sha256_final(rs[i], msg[i], sizeof(msg[i]));
-  };
+  for (size_t i = 0; i < count; ++i) prepare33(msg[i], points + i);
+  for (size_t i = 0; i < count; ++i) sha256_final(rs[i], msg[i], sizeof(msg[i]));
 
   for (size_t i = 0; i < count; ++i) prepare_rmd(rs[i]);
   rmd160_batch(hashes, rs);
@@ -108,10 +111,8 @@ void addr65_batch(h160_t *hashes, const pe *points, size_t count) {
   u8 msg[HASH_BATCH_SIZE][128] = {0}; // sha256 payload
   u32 rs[HASH_BATCH_SIZE][16] = {0};  // sha256 output and rmd160 input
 
-  for (size_t i = 0; i < count; ++i) {
-    prepare33(msg[i], points + i);
-    sha256_final(rs[i], msg[i], sizeof(msg[i]));
-  };
+  for (size_t i = 0; i < count; ++i) prepare65(msg[i], points + i);
+  for (size_t i = 0; i < count; ++i) sha256_final(rs[i], msg[i], sizeof(msg[i]));
 
   for (size_t i = 0; i < count; ++i) prepare_rmd(rs[i]);
   rmd160_batch(hashes, rs);

@@ -193,36 +193,51 @@ void ctx_precompute_gpoints(ctx_t *ctx) {
   }
 }
 
+void pk_verify_hash(const fe pk, const h160_t hash, bool compressed) {
+  pe point;
+  ec_jacobi_mul(&point, &G1, pk);
+  ec_jacobi_rdc(&point, &point);
+
+  h160_t h;
+  compressed ? addr33(h, &point) : addr65(h, &point);
+
+  bool is_equal = memcmp(h, hash, sizeof(h160_t)) == 0;
+  if (!is_equal) {
+    fprintf(stderr, "[!] error: hash mismatch (compressed: %d)\n", compressed);
+    fprintf(stderr, "pk: %016llx%016llx%016llx%016llx\n", pk[3], pk[2], pk[1], pk[0]);
+    fprintf(stderr, "lh: %08x%08x%08x%08x%08x\n", hash[0], hash[1], hash[2], hash[3], hash[4]);
+    fprintf(stderr, "rh: %08x%08x%08x%08x%08x\n", h[0], h[1], h[2], h[3], h[4]);
+    exit(1);
+  }
+}
+
 // MARK: CMD_ADD
 
 u64 check_found_add(ctx_t *ctx, fe ck, const pe *points) {
-  h160_t hashes[HASH_BATCH_SIZE];
+
+  h160_t hs33[HASH_BATCH_SIZE];
+  h160_t hs65[HASH_BATCH_SIZE];
   u64 found = 0;
 
-  if (ctx->check_addr33) {
-    for (size_t i = 0; i < GROUP_INV_SIZE; i += HASH_BATCH_SIZE) {
-      addr33_batch(hashes, points + i, HASH_BATCH_SIZE);
-      for (size_t j = 0; j < HASH_BATCH_SIZE; ++j) {
-        fe_modadd(ck, ck, ctx->gs);
-        if (ctx_check_hash(ctx, hashes[j])) {
-          ctx_write_found(ctx, "addr33", hashes[j], ck);
-          ctx_print_status(ctx, false);
-          found += 1;
-        }
-      }
-    }
-  }
+  for (size_t i = 0; i < GROUP_INV_SIZE; i += HASH_BATCH_SIZE) {
+    if (ctx->check_addr33) addr33_batch(hs33, points + i, HASH_BATCH_SIZE);
+    if (ctx->check_addr65) addr65_batch(hs65, points + i, HASH_BATCH_SIZE);
 
-  if (ctx->check_addr65) {
-    for (size_t i = 0; i < GROUP_INV_SIZE; i += HASH_BATCH_SIZE) {
-      addr65_batch(hashes, points + i, HASH_BATCH_SIZE);
-      for (size_t j = 0; j < HASH_BATCH_SIZE; ++j) {
-        fe_modadd(ck, ck, ctx->gs);
-        if (ctx_check_hash(ctx, hashes[j])) {
-          ctx_write_found(ctx, "addr65", hashes[j], ck);
-          ctx_print_status(ctx, false);
-          found += 1;
-        }
+    for (size_t j = 0; j < HASH_BATCH_SIZE; ++j) {
+      fe_modadd(ck, ck, ctx->gs);
+
+      if (ctx->check_addr33 && ctx_check_hash(ctx, hs33[j])) {
+        // pk_verify_hash(ck, hs33[j], true);
+        ctx_write_found(ctx, "addr33", hs33[j], ck);
+        ctx_print_status(ctx, false);
+        found += 1;
+      }
+
+      if (ctx->check_addr65 && ctx_check_hash(ctx, hs65[j])) {
+        // pk_verify_hash(ck, hs65[j], false);
+        ctx_write_found(ctx, "addr65", hs65[j], ck);
+        ctx_print_status(ctx, false);
+        found += 1;
       }
     }
   }
@@ -267,6 +282,7 @@ u64 batch_add(ctx_t *ctx, const fe pk, const u64 iterations) {
 
       fe_clone(bp[i].x, rx);
       fe_clone(bp[i].y, ry);
+      fe_set64(bp[i].z, 0x1);
 
       // ec_jacobi_add(&check_point, &check_point, &ctx->gpoints[0]);
       // ec_jacobi_rdc(&check_point, &check_point);
@@ -276,6 +292,7 @@ u64 batch_add(ctx_t *ctx, const fe pk, const u64 iterations) {
       // }
     }
 
+    // ck will be modified in check_found_add
     found += check_found_add(ctx, ck, bp);
 
     memcpy(&start_point, &bp[dx_size - 1], sizeof(pe));
