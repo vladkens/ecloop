@@ -3,17 +3,20 @@
 // Licensed under the MIT License.
 
 #pragma once
+#include <stdalign.h>
 #include <stdint.h>
-#include <stdlib.h>
 
-// Reference implementation of RIPEMD-160
 // https://homes.esat.kuleuven.be/~bosselae/ripemd160/pdf/AB-9601/AB-9601.pdf
 // https://homes.esat.kuleuven.be/~bosselae/ripemd160/ps/AB-9601/rmd160.h
 // https://homes.esat.kuleuven.be/~bosselae/ripemd160/ps/AB-9601/rmd160.c
 
-#define NOSIMD 0
+#define RMD_K1 0x67452301
+#define RMD_K2 0xEFCDAB89
+#define RMD_K3 0x98BADCFE
+#define RMD_K4 0x10325476
+#define RMD_K5 0xC3D2E1F0
 
-#if defined(__aarch64__) && defined(__ARM_NEON) && !NOSIMD
+#if defined(__aarch64__) && defined(__ARM_NEON) && !defined(NO_SIMD)
   #include <arm_neon.h>
 
   #define RMD_LEN 4
@@ -41,7 +44,7 @@
   #define RMD_ADD3(a, b, c) vaddq_u32(vaddq_u32(a, b), c)
   #define RMD_ADD4(a, b, c, d) vaddq_u32(vaddq_u32(vaddq_u32(a, b), c), d)
 
-#elif defined(__x86_64__) && defined(__AVX2__) && !NOSIMD
+#elif defined(__x86_64__) && defined(__AVX2__) && !defined(NO_SIMD)
   #include <immintrin.h>
 
   #define RMD_LEN 8
@@ -58,14 +61,9 @@
 
   #define RMD_DUMP(r, s, i)                                                                        \
     do {                                                                                           \
-      r[0][i] = _mm256_extract_epi32(s[i], 0);                                                     \
-      r[1][i] = _mm256_extract_epi32(s[i], 1);                                                     \
-      r[2][i] = _mm256_extract_epi32(s[i], 2);                                                     \
-      r[3][i] = _mm256_extract_epi32(s[i], 3);                                                     \
-      r[4][i] = _mm256_extract_epi32(s[i], 4);                                                     \
-      r[5][i] = _mm256_extract_epi32(s[i], 5);                                                     \
-      r[6][i] = _mm256_extract_epi32(s[i], 6);                                                     \
-      r[7][i] = _mm256_extract_epi32(s[i], 7);                                                     \
+      alignas(32) int32_t tmp[8];                                                                  \
+      _mm256_store_si256((__m256i *)tmp, s[i]);                                                    \
+      for (int j = 0; j < 8; ++j) r[j][i] = tmp[j];                                                \
     } while (0);
 
   #define _mm256_not_si256(x) _mm256_xor_si256((x), _mm256_set1_epi32(0xffffffff))
@@ -102,12 +100,6 @@
   #define RMD_ADD3(a, b, c) (a + b + c)
   #define RMD_ADD4(a, b, c, d) (a + b + c + d)
 #endif
-
-#define RMD_K1 0x67452301
-#define RMD_K2 0xEFCDAB89
-#define RMD_K3 0x98BADCFE
-#define RMD_K4 0x10325476
-#define RMD_K5 0xC3D2E1F0
 
 #define RMD_RN(a, b, c, d, e, f, x, k, r)                                                          \
   u = RMD_ADD4(a, f, x, RMD_LD_NUM(k));                                                            \

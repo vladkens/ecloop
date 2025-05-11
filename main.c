@@ -12,7 +12,7 @@
 #include "lib/ecc.c"
 #include "lib/utils.c"
 
-#define VERSION "0.3.0"
+#define VERSION "0.4.0"
 #define MAX_JOB_SIZE 1024 * 1024 * 2
 #define GROUP_INV_SIZE 1024
 #define MAX_LINE_SIZE 128
