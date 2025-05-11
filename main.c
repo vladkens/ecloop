@@ -2,13 +2,10 @@
 // https://github.com/vladkens/ecloop
 // Licensed under the MIT License.
 
-#include <assert.h>
+#include <fcntl.h>
 #include <locale.h>
 #include <signal.h>
-#include <stdbool.h>
-#include <string.h>
 #include <termios.h>
-#include <unistd.h>
 
 #include "lib/addr.c"
 #include "lib/bench.c"
@@ -35,10 +32,15 @@ typedef struct ctx_t {
   size_t stime;
   bool check_addr33;
   bool check_addr65;
-  bool use_color;
 
   FILE *outfile;
   bool quiet;
+  bool use_color;
+
+  bool paused;
+  bool pause_printed;
+  size_t paused_time; // total time spent in paused state (milliseconds)
+  size_t pause_start; // timestamp when pause started
 
   // filter file (bloom filter or hashes to search)
   h160_t *to_find_hashes;
@@ -107,12 +109,16 @@ void load_filter(ctx_t *ctx, const char *filepath) {
 }
 
 void ctx_print_status(ctx_t *ctx, bool final) {
+  char *msg = final ? "" : (ctx->paused ? " [Press 'r' to resume]" : " [Press 'p' to pause]");
+  char chr = final ? '\n' : '\r';
+
   pthread_mutex_lock(&ctx->lock);
-  double dt = (tsnow() - ctx->stime) / 1000.0;
+  size_t effective_time = tsnow() - ctx->stime - ctx->paused_time;
+  double dt = effective_time / 1000.0;
   double it = ctx->k_checked / dt / 1000000;
   term_clear_line();
-  fprintf(stderr, "%.2fs ~ %.2f Mkeys/s ~ %'llu / %'llu%c", //
-          dt, it, ctx->k_found, ctx->k_checked, final ? '\n' : '\r');
+  fprintf(stderr, "%.2fs ~ %.2f Mkeys/s ~ %'llu / %'llu%s%c", //
+          dt, it, ctx->k_found, ctx->k_checked, msg, chr);
   fflush(stderr);
   pthread_mutex_unlock(&ctx->lock);
 }
@@ -172,6 +178,22 @@ bool ctx_check_found(ctx_t *ctx, const pe *cp, const fe pk) {
   return found;
 }
 
+void ctx_check_paused(ctx_t *ctx) {
+  if (ctx->paused) {
+    if (!ctx->pause_printed) {
+      ctx->pause_printed = true;
+      ctx_print_status(ctx, false);
+    }
+
+    while (ctx->paused) usleep(100000);
+
+    if (ctx->pause_printed) {
+      ctx->pause_printed = false;
+      ctx_print_status(ctx, false);
+    }
+  }
+}
+
 void ctx_precompute_gpoints(ctx_t *ctx) {
   // precompute gpoints (Gi, Gi*2, Gi*3, ...)
   fe gs = {0};
@@ -214,7 +236,6 @@ void pk_verify_hash(const fe pk, const h160_t hash, bool compressed) {
 // MARK: CMD_ADD
 
 u64 check_found_add(ctx_t *ctx, fe ck, const pe *points) {
-
   h160_t hs33[HASH_BATCH_SIZE];
   h160_t hs65[HASH_BATCH_SIZE];
   u64 found = 0;
@@ -297,6 +318,7 @@ u64 batch_add(ctx_t *ctx, const fe pk, const u64 iterations) {
 
     memcpy(&start_point, &bp[dx_size - 1], sizeof(pe));
     counter += dx_size;
+    ctx_check_paused(ctx);
   }
 
   return found;
@@ -334,6 +356,7 @@ void *cmd_add_worker(void *arg) {
     ctx->k_found += found;
     pthread_mutex_unlock(&ctx->lock);
     ctx_print_status(ctx, false);
+    ctx_check_paused(ctx);
   }
 
   return NULL;
@@ -359,6 +382,35 @@ int cmd_add(ctx_t *ctx) {
 }
 
 // MARK: CMD_MUL
+
+u64 check_found_mul(ctx_t *ctx, const fe *pk, const pe *cp, size_t count) {
+  h160_t hs33[HASH_BATCH_SIZE];
+  h160_t hs65[HASH_BATCH_SIZE];
+  u64 found = 0;
+
+  for (size_t i = 0; i < count; i += HASH_BATCH_SIZE) {
+    if (ctx->check_addr33) addr33_batch(hs33, cp + i, HASH_BATCH_SIZE);
+    if (ctx->check_addr65) addr65_batch(hs65, cp + i, HASH_BATCH_SIZE);
+
+    for (size_t j = 0; j < HASH_BATCH_SIZE; ++j) {
+      if (ctx->check_addr33 && ctx_check_hash(ctx, hs33[j])) {
+        // pk_verify_hash(pk[i + j], hs33[j], true);
+        ctx_write_found(ctx, "addr33", hs33[j], pk[i + j]);
+        ctx_print_status(ctx, false);
+        found += 1;
+      }
+
+      if (ctx->check_addr65 && ctx_check_hash(ctx, hs65[j])) {
+        // pk_verify_hash(pk[i + j], hs65[j], false);
+        ctx_write_found(ctx, "addr65", hs65[j], pk[i + j]);
+        ctx_print_status(ctx, false);
+        found += 1;
+      }
+    }
+  }
+
+  return found;
+}
 
 typedef struct cmd_mul_job_t {
   size_t count;
@@ -389,7 +441,7 @@ void *cmd_mul_worker(void *arg) {
         size_t len = strlen(job->lines[i]);
         size_t msg_size = (len + 63 + 9) / 64 * 64;
 
-        // caclulate sha256 hash
+        // calculate sha256 hash
         size_t bitlen = len * 8;
         memcpy(msg, job->lines[i], len);
         memset(msg + len, 0, msg_size - len);
@@ -413,6 +465,7 @@ void *cmd_mul_worker(void *arg) {
     for (size_t i = 0; i < job->count; ++i) ec_gtable_mul(&cp[i], pk[i]);
     ec_jacobi_grprdc(cp, job->count);
 
+    // size_t found = check_found_mul(ctx, pk, cp, job->count);
     size_t found = 0;
     for (size_t i = 0; i < job->count; ++i) {
       if (ctx_check_found(ctx, &cp[i], pk[i])) found += 1;
@@ -423,6 +476,7 @@ void *cmd_mul_worker(void *arg) {
     ctx->k_found += found;
     pthread_mutex_unlock(&ctx->lock);
     ctx_print_status(ctx, false);
+    ctx_check_paused(ctx);
   }
 
   if (job != NULL) free(job);
@@ -645,6 +699,7 @@ void usage(const char *name) {
   printf("  -q              - quiet mode (no output to stdout; -o required)\n");
   printf("\nOther commands:\n");
   printf("  blf-gen         - create bloom filter from list of hex-encoded hash160\n");
+  printf("  blf-check       - check bloom filter for given hex-encoded hash160\n");
   printf("  bench           - run benchmark of internal functions\n");
   printf("  bench-gtable    - run benchmark of ecc multiplication (with different table size)\n");
   printf("\n");
@@ -654,13 +709,15 @@ void init(ctx_t *ctx, args_t *args) {
   // check other commands first
   if (args->argc > 1) {
     if (strcmp(args->argv[1], "blf-gen") == 0) return blf_gen(args);
+    if (strcmp(args->argv[1], "blf-check") == 0) return blf_check(args);
     if (strcmp(args->argv[1], "bench") == 0) return run_bench();
     if (strcmp(args->argv[1], "bench-gtable") == 0) return run_bench_gtable();
     if (strcmp(args->argv[1], "mult-verify") == 0) return mult_verify(args);
-    if (strcmp(args->argv[1], "blf-check") == 0) return blf_check(args);
   }
 
   ctx->use_color = isatty(fileno(stdout));
+  ctx->paused_time = 0;
+  ctx->paused = false;
 
   ctx->cmd = CMD_NIL; // default show help
   if (args->argc > 1) {
@@ -734,14 +791,6 @@ void init(ctx_t *ctx, args_t *args) {
   printf("----------------------------------------\n");
 }
 
-void disable_echoctl() {
-  struct termios t;
-  if (tcgetattr(STDIN_FILENO, &t) == 0) {
-    t.c_lflag &= ~ECHOCTL; // Disable ^C echo
-    tcsetattr(STDIN_FILENO, TCSANOW, &t);
-  }
-}
-
 void handle_sigint(int sig) {
   fflush(stderr);
   fflush(stdout);
@@ -749,18 +798,64 @@ void handle_sigint(int sig) {
   exit(sig);
 }
 
+void *kb_listener(void *arg) {
+  ctx_t *ctx = (ctx_t *)arg;
+
+  int tty_fd = open("/dev/tty", O_RDONLY);
+  if (tty_fd < 0) {
+    perror("open /dev/tty");
+    return NULL;
+  }
+
+  struct termios t;
+  if (tcgetattr(tty_fd, &t) == 0) {
+    t.c_lflag &= ~(ICANON | ECHO);
+    tcsetattr(tty_fd, TCSANOW, &t);
+  }
+
+  fd_set fds;
+  char ch;
+
+  while (true) {
+    FD_ZERO(&fds);
+    FD_SET(tty_fd, &fds);
+
+    int ret = select(tty_fd + 1, &fds, NULL, NULL, NULL);
+    if (ret < 0) {
+      perror("select");
+      break;
+    }
+
+    if (FD_ISSET(tty_fd, &fds)) {
+      if (read(tty_fd, &ch, 1) > 0) {
+        if (ch == 'p') {
+          ctx->pause_printed = false;
+          ctx->pause_start = tsnow();
+          ctx->paused = true;
+        }
+
+        if (ch == 'r') {
+          ctx->paused_time += tsnow() - ctx->pause_start;
+          ctx->paused = false;
+        }
+      }
+    }
+  }
+
+  return NULL;
+}
+
 int main(int argc, const char **argv) {
   // https://stackoverflow.com/a/11695246
   setlocale(LC_NUMERIC, ""); // for comma separated numbers
-
-  // Keep last progress line on Ctrl-C
-  signal(SIGINT, handle_sigint);
-  disable_echoctl();
-
   args_t args = {argc, argv};
 
   ctx_t ctx;
   init(&ctx, &args);
+
+  pthread_t kb_thread;
+  pthread_create(&kb_thread, NULL, kb_listener, &ctx);
+  signal(SIGINT, handle_sigint); // Keep last progress line on Ctrl-C
 
   if (ctx.cmd == CMD_ADD) cmd_add(&ctx);
   if (ctx.cmd == CMD_MUL) cmd_mul(&ctx);
