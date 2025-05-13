@@ -267,8 +267,8 @@ void fe_modsqr(fe r, const fe a) {
 INLINE void fe_shiftl(fe r, const u8 n) {
   if (n == 0) return;
 
-  u64 s = n / 64;
-  u64 rem = n % 64;
+  u8 s = n / 64;
+  u8 rem = n % 64;
 
   for (int i = 3; i >= 0; --i) {
     if (i >= s) {
@@ -708,12 +708,12 @@ void ec_jacobi_mul(pe *r, const pe *p, const fe k) {
   // double-and-add in Jacobian space
   pe t;
   pe_clone(&t, p);
-  fe_set64(r->x, 0x0);
+  fe_set64(r->x, 0x0); // todo: for first iteration to avoid point of infinity
   fe_set64(r->y, 0x0);
   fe_set64(r->z, 0x1);
 
   u32 bits = fe_bitlen(k);
-  for (int i = 0; i < bits; ++i) {
+  for (u32 i = 0; i < bits; ++i) {
     if (k[i / 64] & (1ULL << (i % 64))) {
       // todo: remove if condition / here simplified check to point of infinity
       if (r->x[0] == 0 && r->y[0] == 0) {

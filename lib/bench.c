@@ -9,8 +9,8 @@
 #include "ecc.c"
 #include "utils.c"
 
-void print_res(char *label, u64 stime, u64 iters) {
-  double dt = MAX((tsnow() - stime), 1) / 1000.0;
+void print_res(char *label, size_t stime, size_t iters) {
+  double dt = MAX((tsnow() - stime), 1ul) / 1000.0;
   printf("%20s: %.2fM it/s ~ %.2fs\n", label, iters / dt / 1000000, dt);
 }
 
@@ -18,7 +18,7 @@ void run_bench() {
   ec_gtable_init();
 
   // note: asserts used to prevent compiler optimization
-  u64 stime, iters, i;
+  size_t stime, iters, i;
   pe g;
   fe f;
 
@@ -51,9 +51,9 @@ void run_bench() {
 
   // ec multiplication
   srand(42);
-  u64 numSize = 1024 * 16;
+  size_t numSize = 1024 * 16;
   fe numbers[numSize];
-  for (int i = 0; i < numSize; ++i) fe_prand(numbers[i]);
+  for (size_t i = 0; i < numSize; ++i) fe_prand(numbers[i]);
   pe_clone(&g, &G2);
 
   iters = 1000 * 10;
@@ -113,12 +113,12 @@ void run_bench() {
 
 void run_bench_gtable() {
   srand(42);
-  u64 numSize = 1024 * 16;
+  size_t numSize = 1024 * 16;
   fe numbers[numSize];
-  for (int i = 0; i < numSize; ++i) fe_prand(numbers[i]);
+  for (size_t i = 0; i < numSize; ++i) fe_prand(numbers[i]);
 
-  u64 iters = 1000 * 500;
-  u64 stime;
+  size_t iters = 1000 * 500;
+  size_t stime;
   double gent, mult;
   pe g;
 
@@ -131,7 +131,7 @@ void run_bench_gtable() {
     gent = ((double)(tsnow() - stime)) / 1000;
 
     stime = tsnow();
-    for (u64 i = 0; i < iters; ++i) ec_gtable_mul(&g, numbers[i % numSize]);
+    for (size_t i = 0; i < iters; ++i) ec_gtable_mul(&g, numbers[i % numSize]);
     mult = ((double)(tsnow() - stime)) / 1000;
 
     double mem = (double)mem_used / 1024 / 1024;                              // MB
@@ -140,7 +140,7 @@ void run_bench_gtable() {
   }
 }
 
-void mult_verify(args_t *args) {
+void mult_verify() {
   ec_gtable_init();
 
   pe r1, r2;

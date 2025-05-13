@@ -23,11 +23,9 @@ git clone https://github.com/vladkens/ecloop.git && cd ecloop
 make build
 ```
 
-_Note: By default, `cc` is used as the compiler. Using `clang` may produce [faster code](https://github.com/vladkens/ecloop/issues/7) than `gcc`._
+_\* On macOS, you may need to run `xcode-select --install` first._
 
-_Note 2: On macOS, you may need to run `xcode-select --install` first._
-
-You can explicitly specify the compiler for any `make` command using the `CC` parameter. For example: `make add CC=clang`.
+By default, `cc` is used as the compiler. Using `clang` may produce [faster code](https://github.com/vladkens/ecloop/issues/7) than `gcc`. You can explicitly specify the compiler for any `make` command using the `CC` parameter. For example: `make add CC=clang`.
 
 Also, verify correctness with the following commands (some compiler versions may have issues with built-ins used in the code):
 

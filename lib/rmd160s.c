@@ -27,19 +27,18 @@
   #define RMD_LOAD(x, i) vld1q_u32(((uint32_t[4]){x[0][i], x[1][i], x[2][i], x[3][i]}))
   #define RMD_DUMP(r, s, i)                                                                        \
     do {                                                                                           \
-      r[0][i] = vgetq_lane_u32(s[i], 0);                                                           \
-      r[1][i] = vgetq_lane_u32(s[i], 1);                                                           \
-      r[2][i] = vgetq_lane_u32(s[i], 2);                                                           \
-      r[3][i] = vgetq_lane_u32(s[i], 3);                                                           \
+      alignas(16) uint32_t tmp[4];                                                                 \
+      vst1q_u32(tmp, s[i]);                                                                        \
+      for (int j = 0; j < 4; ++j) r[j][i] = tmp[j];                                                \
     } while (0);
 
   #define RMD_F1(x, y, z) veorq_u32(veorq_u32(x, y), z)
-  #define RMD_F2(x, y, z) vorrq_u32(vandq_u32(x, y), vandq_u32(vmvnq_u32(x), z))
+  #define RMD_F2(x, y, z) vbslq_u32(x, y, z)
   #define RMD_F3(x, y, z) veorq_u32(vorrq_u32(x, vmvnq_u32(y)), z)
-  #define RMD_F4(x, y, z) vorrq_u32(vandq_u32(x, z), vandq_u32(y, vmvnq_u32(z)))
+  #define RMD_F4(x, y, z) vbslq_u32(z, x, y)
   #define RMD_F5(x, y, z) veorq_u32(x, vorrq_u32(y, vmvnq_u32(z)))
 
-  #define RMD_ROTL(x, n) vorrq_u32(vshlq_n_u32(x, n), vshrq_n_u32(x, 32 - (n)))
+  #define RMD_ROTL(x, n) vsriq_n_u32(vshlq_n_u32(x, n), x, 32 - (n))
   #define RMD_ADD2(a, b) vaddq_u32(a, b)
   #define RMD_ADD3(a, b, c) vaddq_u32(vaddq_u32(a, b), c)
   #define RMD_ADD4(a, b, c, d) vaddq_u32(vaddq_u32(vaddq_u32(a, b), c), d)
@@ -99,6 +98,7 @@
   #define RMD_ADD2(a, b) (a + b)
   #define RMD_ADD3(a, b, c) (a + b + c)
   #define RMD_ADD4(a, b, c, d) (a + b + c + d)
+
 #endif
 
 #define RMD_RN(a, b, c, d, e, f, x, k, r)                                                          \
@@ -117,6 +117,8 @@
 #define RMD_R4(a, b, c, d, e, x, r) RMD_RN(a, b, c, d, e, RMD_F2(b, c, d), x, 0x7A6D76E9ul, r)
 #define RMD_R5(a, b, c, d, e, x, r) RMD_RN(a, b, c, d, e, RMD_F1(b, c, d), x, 0, r)
 
+#define RMD_LOAD_SWAP(x, i) RMD_SWAP(RMD_LOAD(x, i))
+
 void rmd160_block(RMD_VEC *s, const uint32_t x[RMD_LEN][16]) {
   RMD_VEC a1, b1, c1, d1, e1, a2, b2, c2, d2, e2, u;
   a1 = a2 = RMD_LD_NUM(RMD_K1);
@@ -126,7 +128,26 @@ void rmd160_block(RMD_VEC *s, const uint32_t x[RMD_LEN][16]) {
   e1 = e2 = RMD_LD_NUM(RMD_K5);
 
   RMD_VEC w[16];
-  for (int i = 0; i < 16; i++) w[i] = RMD_LOAD(x, i);
+  // for (int i = 0; i < 16; i++) w[i] = RMD_LOAD(x, i);
+
+  // SHA256 is big-endian, but RIPEMD-160 is little-endian, so swap bytes here
+  // keep unrolled let ILP decide how to schedule
+  w[0] = RMD_LOAD_SWAP(x, 0);
+  w[1] = RMD_LOAD_SWAP(x, 1);
+  w[2] = RMD_LOAD_SWAP(x, 2);
+  w[3] = RMD_LOAD_SWAP(x, 3);
+  w[4] = RMD_LOAD_SWAP(x, 4);
+  w[5] = RMD_LOAD_SWAP(x, 5);
+  w[6] = RMD_LOAD_SWAP(x, 6);
+  w[7] = RMD_LOAD_SWAP(x, 7);
+  w[8] = RMD_LOAD_SWAP(x, 8);
+  w[9] = RMD_LOAD_SWAP(x, 9);
+  w[10] = RMD_LOAD_SWAP(x, 10);
+  w[11] = RMD_LOAD_SWAP(x, 11);
+  w[12] = RMD_LOAD_SWAP(x, 12);
+  w[13] = RMD_LOAD_SWAP(x, 13);
+  w[14] = RMD_LOAD_SWAP(x, 14);
+  w[15] = RMD_LOAD_SWAP(x, 15);
 
   RMD_L1(a1, b1, c1, d1, e1, w[0], 11);
   RMD_R1(a2, b2, c2, d2, e2, w[5], 8);

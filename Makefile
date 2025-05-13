@@ -2,6 +2,7 @@
 
 CC = cc
 CC_FLAGS ?= -O3 -ffast-math
+# CC_FLAGS ?= -O3 -ffast-math -Wall -Wextra
 
 ifeq ($(shell uname -m),x86_64)
 	CC_FLAGS += -march=native -pthread -lpthread
@@ -30,7 +31,7 @@ mul: build
 	cat data/btc-bw-priv | ./ecloop mul -f data/btc-bw-hash -a cu -q -o /dev/null
 
 rnd: build
-	./ecloop rnd -f data/btc-puzzles-hash -r 100000000:ffffffffffffffffffffffff
+	./ecloop rnd -f data/btc-puzzles-hash -r 800000000000000000:ffffffffffffffffff -d 0:32
 
 blf: build
 	@rm -rf /tmp/test.blf

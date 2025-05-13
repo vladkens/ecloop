@@ -14,7 +14,7 @@
 
 #define VERSION "0.4.0"
 #define MAX_JOB_SIZE 1024 * 1024 * 2
-#define GROUP_INV_SIZE 1024
+#define GROUP_INV_SIZE 1024ul
 #define MAX_LINE_SIZE 128
 
 static_assert(GROUP_INV_SIZE % HASH_BATCH_SIZE == 0,
@@ -27,9 +27,8 @@ typedef struct ctx_t {
   pthread_mutex_t lock;
   size_t threads_count;
   pthread_t *threads;
-  u64 k_checked;
-  u64 k_found;
-  size_t stime;
+  size_t k_checked;
+  size_t k_found;
   bool check_addr33;
   bool check_addr65;
 
@@ -37,10 +36,12 @@ typedef struct ctx_t {
   bool quiet;
   bool use_color;
 
-  bool paused;
-  bool pause_printed;
-  size_t paused_time; // total time spent in paused state (milliseconds)
-  size_t pause_start; // timestamp when pause started
+  bool finished;      // true if the program is exiting
+  bool paused;        // true if the program is paused
+  size_t ts_started;  // timestamp of start
+  size_t ts_updated;  // timestamp of last update
+  size_t ts_printed;  // timestamp of last print
+  size_t paused_time; // time spent in paused state
 
   // filter file (bloom filter or hashes to search)
   h160_t *to_find_hashes;
@@ -52,7 +53,7 @@ typedef struct ctx_t {
   fe range_e; // search range end
   fe gs;      // base step for G-point grid (2^offset)
   pe gpoints[GROUP_INV_SIZE];
-  u64 job_size;
+  size_t job_size;
 
   // cmd mul
   queue_t queue;
@@ -108,18 +109,53 @@ void load_filter(ctx_t *ctx, const char *filepath) {
   fclose(file);
 }
 
-void ctx_print_status(ctx_t *ctx, bool final) {
-  char *msg = final ? "" : (ctx->paused ? " [Press 'r' to resume]" : " [Press 'p' to pause]");
-  char chr = final ? '\n' : '\r';
+// note: this function is not thread-safe; use mutex lock before calling
+void ctx_print_unlocked(ctx_t *ctx) {
+  char *msg =
+      ctx->finished ? "" : (ctx->paused ? " [Press 'r' to resume]" : " [Press 'p' to pause]");
 
-  pthread_mutex_lock(&ctx->lock);
-  size_t effective_time = tsnow() - ctx->stime - ctx->paused_time;
-  double dt = effective_time / 1000.0;
+  int64_t effective_time = (int64_t)(ctx->ts_updated - ctx->ts_started) - (int64_t)ctx->paused_time;
+  double dt = MAX(1, effective_time) / 1000.0;
   double it = ctx->k_checked / dt / 1000000;
   term_clear_line();
-  fprintf(stderr, "%.2fs ~ %.2f Mkeys/s ~ %'llu / %'llu%s%c", //
-          dt, it, ctx->k_found, ctx->k_checked, msg, chr);
+  fprintf(stderr, "%.2fs ~ %.2f Mkeys/s ~ %'zu / %'zu%s%c", //
+          dt, it, ctx->k_found, ctx->k_checked, msg, ctx->finished ? '\n' : '\r');
   fflush(stderr);
+}
+
+void ctx_print_status(ctx_t *ctx) {
+  pthread_mutex_lock(&ctx->lock);
+  ctx_print_unlocked(ctx);
+  pthread_mutex_unlock(&ctx->lock);
+}
+
+void ctx_check_paused(ctx_t *ctx) {
+  if (ctx->paused) {
+    while (ctx->paused) usleep(100000);
+  }
+}
+
+void ctx_update(ctx_t *ctx, size_t k_checked) {
+  size_t ts = tsnow();
+
+  pthread_mutex_lock(&ctx->lock);
+  bool need_print = (ts - ctx->ts_printed) >= 100;
+  ctx->k_checked += k_checked;
+  ctx->ts_updated = ts;
+  if (need_print) {
+    ctx->ts_printed = ts;
+    ctx_print_unlocked(ctx);
+  }
+  pthread_mutex_unlock(&ctx->lock);
+
+  ctx_check_paused(ctx);
+}
+
+void ctx_finish(ctx_t *ctx) {
+  pthread_mutex_lock(&ctx->lock);
+  ctx->finished = true;
+  ctx_print_unlocked(ctx);
+  if (ctx->outfile != NULL) fclose(ctx->outfile);
   pthread_mutex_unlock(&ctx->lock);
 }
 
@@ -140,6 +176,9 @@ void ctx_write_found(ctx_t *ctx, const char *label, const h160_t hash, const fe 
     fflush(ctx->outfile);
   }
 
+  ctx->k_found += 1;
+  ctx_print_unlocked(ctx);
+
   pthread_mutex_unlock(&ctx->lock);
 }
 
@@ -151,47 +190,6 @@ bool ctx_check_hash(ctx_t *ctx, const h160_t h) {
     if (rs) return true;
   }
   return false;
-}
-
-bool ctx_check_found(ctx_t *ctx, const pe *cp, const fe pk) {
-  h160_t hash;
-  bool found = false;
-
-  if (ctx->check_addr33) {
-    addr33(hash, cp);
-    if (ctx_check_hash(ctx, hash)) {
-      ctx_write_found(ctx, "addr33", hash, pk);
-      ctx_print_status(ctx, false);
-      found = true;
-    }
-  }
-
-  if (ctx->check_addr65) {
-    addr65(hash, cp);
-    if (ctx_check_hash(ctx, hash)) {
-      ctx_write_found(ctx, "addr65", hash, pk);
-      ctx_print_status(ctx, false);
-      found = true;
-    }
-  }
-
-  return found;
-}
-
-void ctx_check_paused(ctx_t *ctx) {
-  if (ctx->paused) {
-    if (!ctx->pause_printed) {
-      ctx->pause_printed = true;
-      ctx_print_status(ctx, false);
-    }
-
-    while (ctx->paused) usleep(100000);
-
-    if (ctx->pause_printed) {
-      ctx->pause_printed = false;
-      ctx_print_status(ctx, false);
-    }
-  }
 }
 
 void ctx_precompute_gpoints(ctx_t *ctx) {
@@ -209,7 +207,7 @@ void ctx_precompute_gpoints(ctx_t *ctx) {
 
   memcpy(ctx->gpoints + 0, &g1, sizeof(pe));
   memcpy(ctx->gpoints + 1, &g2, sizeof(pe));
-  for (u64 i = 2; i < GROUP_INV_SIZE; ++i) {
+  for (size_t i = 2; i < GROUP_INV_SIZE; ++i) {
     ec_jacobi_add(ctx->gpoints + i, ctx->gpoints + i - 1, &g1);
     ec_jacobi_rdc(ctx->gpoints + i, ctx->gpoints + i);
   }
@@ -235,10 +233,9 @@ void pk_verify_hash(const fe pk, const h160_t hash, bool compressed) {
 
 // MARK: CMD_ADD
 
-u64 check_found_add(ctx_t *ctx, fe ck, const pe *points) {
+void check_found_add(ctx_t *ctx, fe ck, const pe *points) {
   h160_t hs33[HASH_BATCH_SIZE];
   h160_t hs65[HASH_BATCH_SIZE];
-  u64 found = 0;
 
   for (size_t i = 0; i < GROUP_INV_SIZE; i += HASH_BATCH_SIZE) {
     if (ctx->check_addr33) addr33_batch(hs33, points + i, HASH_BATCH_SIZE);
@@ -250,25 +247,18 @@ u64 check_found_add(ctx_t *ctx, fe ck, const pe *points) {
       if (ctx->check_addr33 && ctx_check_hash(ctx, hs33[j])) {
         // pk_verify_hash(ck, hs33[j], true);
         ctx_write_found(ctx, "addr33", hs33[j], ck);
-        ctx_print_status(ctx, false);
-        found += 1;
       }
 
       if (ctx->check_addr65 && ctx_check_hash(ctx, hs65[j])) {
         // pk_verify_hash(ck, hs65[j], false);
         ctx_write_found(ctx, "addr65", hs65[j], ck);
-        ctx_print_status(ctx, false);
-        found += 1;
       }
     }
   }
-
-  return found;
 }
 
-u64 batch_add(ctx_t *ctx, const fe pk, const u64 iterations) {
-  u64 dx_size = MIN(GROUP_INV_SIZE, iterations);
-  u64 found = 0;
+void batch_add(ctx_t *ctx, const fe pk, const size_t iterations) {
+  size_t dx_size = MIN(GROUP_INV_SIZE, iterations);
 
   fe ck, ss, rx, ry;
   fe dx[dx_size], di[dx_size];
@@ -280,16 +270,16 @@ u64 batch_add(ctx_t *ctx, const fe pk, const u64 iterations) {
   ec_jacobi_rdc(&start_point, &start_point);
   memcpy(&check_point, &start_point, sizeof(pe));
 
-  u64 counter = 0;
+  size_t counter = 0;
   while (counter < iterations) {
-    for (u64 i = 0; i < dx_size; ++i) {
+    for (size_t i = 0; i < dx_size; ++i) {
       fe_modsub(dx[i], ctx->gpoints[i].x, start_point.x);
     }
 
     memcpy(di, dx, sizeof(dx));
     fe_grpinv(di, dx_size);
 
-    for (u64 i = 0; i < dx_size; ++i) {
+    for (size_t i = 0; i < dx_size; ++i) {
       fe_modsub(ss, ctx->gpoints[i].y, start_point.y);
       fe_modmul(ss, ss, di[i]); // λ = (y2 - y1) / (x2 - x1)
 
@@ -313,15 +303,13 @@ u64 batch_add(ctx_t *ctx, const fe pk, const u64 iterations) {
       // }
     }
 
-    // ck will be modified in check_found_add
-    found += check_found_add(ctx, ck, bp);
+    // note: ck will be modified in check_found_add
+    check_found_add(ctx, ck, bp);
 
     memcpy(&start_point, &bp[dx_size - 1], sizeof(pe));
     counter += dx_size;
     ctx_check_paused(ctx);
   }
-
-  return found;
 }
 
 void *cmd_add_worker(void *arg) {
@@ -349,20 +337,14 @@ void *cmd_add_worker(void *arg) {
     fe_modadd(ctx->range_s, ctx->range_s, inc);
     pthread_mutex_unlock(&ctx->lock);
 
-    u64 found = batch_add(ctx, pk, ctx->job_size);
-
-    pthread_mutex_lock(&ctx->lock);
-    ctx->k_checked += ctx->job_size;
-    ctx->k_found += found;
-    pthread_mutex_unlock(&ctx->lock);
-    ctx_print_status(ctx, false);
-    ctx_check_paused(ctx);
+    batch_add(ctx, pk, ctx->job_size);
+    ctx_update(ctx, ctx->job_size);
   }
 
   return NULL;
 }
 
-int cmd_add(ctx_t *ctx) {
+void cmd_add(ctx_t *ctx) {
   ctx_precompute_gpoints(ctx);
 
   fe range_size;
@@ -377,16 +359,14 @@ int cmd_add(ctx_t *ctx) {
     pthread_join(ctx->threads[i], NULL);
   }
 
-  ctx_print_status(ctx, true);
-  return 0;
+  ctx_finish(ctx);
 }
 
 // MARK: CMD_MUL
 
-u64 check_found_mul(ctx_t *ctx, const fe *pk, const pe *cp, size_t count) {
+void check_found_mul(ctx_t *ctx, const fe *pk, const pe *cp, size_t count) {
   h160_t hs33[HASH_BATCH_SIZE];
   h160_t hs65[HASH_BATCH_SIZE];
-  u64 found = 0;
 
   for (size_t i = 0; i < count; i += HASH_BATCH_SIZE) {
     if (ctx->check_addr33) addr33_batch(hs33, cp + i, HASH_BATCH_SIZE);
@@ -396,20 +376,14 @@ u64 check_found_mul(ctx_t *ctx, const fe *pk, const pe *cp, size_t count) {
       if (ctx->check_addr33 && ctx_check_hash(ctx, hs33[j])) {
         // pk_verify_hash(pk[i + j], hs33[j], true);
         ctx_write_found(ctx, "addr33", hs33[j], pk[i + j]);
-        ctx_print_status(ctx, false);
-        found += 1;
       }
 
       if (ctx->check_addr65 && ctx_check_hash(ctx, hs65[j])) {
         // pk_verify_hash(pk[i + j], hs65[j], false);
         ctx_write_found(ctx, "addr65", hs65[j], pk[i + j]);
-        ctx_print_status(ctx, false);
-        found += 1;
       }
     }
   }
-
-  return found;
 }
 
 typedef struct cmd_mul_job_t {
@@ -465,25 +439,15 @@ void *cmd_mul_worker(void *arg) {
     for (size_t i = 0; i < job->count; ++i) ec_gtable_mul(&cp[i], pk[i]);
     ec_jacobi_grprdc(cp, job->count);
 
-    // size_t found = check_found_mul(ctx, pk, cp, job->count);
-    size_t found = 0;
-    for (size_t i = 0; i < job->count; ++i) {
-      if (ctx_check_found(ctx, &cp[i], pk[i])) found += 1;
-    }
-
-    pthread_mutex_lock(&ctx->lock);
-    ctx->k_checked += job->count;
-    ctx->k_found += found;
-    pthread_mutex_unlock(&ctx->lock);
-    ctx_print_status(ctx, false);
-    ctx_check_paused(ctx);
+    check_found_mul(ctx, pk, cp, job->count);
+    ctx_update(ctx, job->count);
   }
 
   if (job != NULL) free(job);
   return NULL;
 }
 
-int cmd_mul(ctx_t *ctx) {
+void cmd_mul(ctx_t *ctx) {
   ec_gtable_init();
 
   for (size_t i = 0; i < ctx->threads_count; ++i) {
@@ -516,8 +480,7 @@ int cmd_mul(ctx_t *ctx) {
     pthread_join(ctx->threads[i], NULL);
   }
 
-  ctx_print_status(ctx, true);
-  return 0;
+  ctx_finish(ctx);
 }
 
 // MARK: CMD_RND
@@ -557,7 +520,7 @@ void print_range_mask(fe range_s, u32 bits_size, u32 offset, bool use_color) {
   putchar('\n');
 }
 
-int cmd_rnd(ctx_t *ctx) {
+void cmd_rnd(ctx_t *ctx) {
   ctx->ord_offs = MIN(ctx->ord_offs, 255 - ctx->ord_size);
   printf("[RANDOM MODE] offs: %d ~ bits: %d\n\n", ctx->ord_offs, ctx->ord_size);
 
@@ -568,7 +531,7 @@ int cmd_rnd(ctx_t *ctx) {
   fe_clone(range_s, ctx->range_s);
   fe_clone(range_e, ctx->range_e);
 
-  u64 last_c = 0, last_f = 0, s_time = tsnow();
+  size_t last_c = 0, last_f = 0, s_time = 0;
   while (true) {
     last_c = ctx->k_checked;
     last_f = ctx->k_found;
@@ -577,7 +540,7 @@ int cmd_rnd(ctx_t *ctx) {
     gen_random_range(ctx, range_s, range_e);
     print_range_mask(ctx->range_s, ctx->ord_size, ctx->ord_offs, ctx->use_color);
     print_range_mask(ctx->range_e, ctx->ord_size, ctx->ord_offs, ctx->use_color);
-    ctx_print_status(ctx, false);
+    ctx_print_status(ctx);
 
     for (size_t i = 0; i < ctx->threads_count; ++i) {
       pthread_create(&ctx->threads[i], NULL, cmd_add_worker, ctx);
@@ -587,13 +550,13 @@ int cmd_rnd(ctx_t *ctx) {
       pthread_join(ctx->threads[i], NULL);
     }
 
-    u64 dc = ctx->k_checked - last_c, df = ctx->k_found - last_f;
-    double dt = MAX((tsnow() - s_time), 1) / 1000.0;
+    size_t dc = ctx->k_checked - last_c, df = ctx->k_found - last_f;
+    double dt = MAX((tsnow() - s_time), 1ul) / 1000.0;
     term_clear_line();
-    printf("%'llu / %'llu ~ %.1fs\n\n", df, dc, dt);
+    printf("%'zu / %'zu ~ %.1fs\n\n", df, dc, dt);
   }
 
-  return 0;
+  ctx_finish(ctx);
 }
 
 // MARK: args helpers
@@ -620,7 +583,7 @@ void arg_search_range(args_t *args, fe range_s, fe range_e) {
   // if (fe_cmp(range_e, P) > 0) fe_clone(range_e, P);
 
   if (fe_cmp64(range_s, GROUP_INV_SIZE) <= 0) {
-    fprintf(stderr, "invalid search range, start <= %#x\n", GROUP_INV_SIZE);
+    fprintf(stderr, "invalid search range, start <= %#lx\n", GROUP_INV_SIZE);
     exit(1);
   }
 
@@ -641,7 +604,7 @@ void load_offs_size(ctx_t *ctx, args_t *args) {
 
   u32 range_bits = fe_bitlen(ctx->range_e);
   u32 default_bits = range_bits < 32 ? MAX(MIN_SIZE, range_bits) : 32;
-  u32 max_offs = MAX(1, MAX(MIN_SIZE, range_bits) - default_bits);
+  u32 max_offs = MAX(1ul, MAX(MIN_SIZE, range_bits) - default_bits);
 
   char *raw = arg_str(args, "-d");
   if (!raw && ctx->cmd == CMD_RND) {
@@ -712,12 +675,10 @@ void init(ctx_t *ctx, args_t *args) {
     if (strcmp(args->argv[1], "blf-check") == 0) return blf_check(args);
     if (strcmp(args->argv[1], "bench") == 0) return run_bench();
     if (strcmp(args->argv[1], "bench-gtable") == 0) return run_bench_gtable();
-    if (strcmp(args->argv[1], "mult-verify") == 0) return mult_verify(args);
+    if (strcmp(args->argv[1], "mult-verify") == 0) return mult_verify();
   }
 
   ctx->use_color = isatty(fileno(stdout));
-  ctx->paused_time = 0;
-  ctx->paused = false;
 
   ctx->cmd = CMD_NIL; // default show help
   if (args->argc > 1) {
@@ -763,11 +724,16 @@ void init(ctx_t *ctx, args_t *args) {
 
   pthread_mutex_init(&ctx->lock, NULL);
   int cpus = get_cpu_count();
-  ctx->threads_count = MIN(MAX(args_int(args, "-t", cpus), 1), 128);
+  ctx->threads_count = MIN(MAX(args_uint(args, "-t", cpus), 1ul), 320ul);
   ctx->threads = malloc(ctx->threads_count * sizeof(pthread_t));
+  ctx->finished = false;
   ctx->k_checked = 0;
   ctx->k_found = 0;
-  ctx->stime = tsnow();
+  ctx->ts_started = tsnow();
+  ctx->ts_updated = ctx->ts_started + 1;
+  ctx->ts_printed = ctx->ts_started - 5e3;
+  ctx->paused_time = 0;
+  ctx->paused = false;
 
   arg_search_range(args, ctx->range_s, ctx->range_e);
   load_offs_size(ctx, args);
@@ -813,6 +779,7 @@ void *kb_listener(void *arg) {
     tcsetattr(tty_fd, TCSANOW, &t);
   }
 
+  size_t ts_paused = 0;
   fd_set fds;
   char ch;
 
@@ -828,15 +795,16 @@ void *kb_listener(void *arg) {
 
     if (FD_ISSET(tty_fd, &fds)) {
       if (read(tty_fd, &ch, 1) > 0) {
-        if (ch == 'p') {
-          ctx->pause_printed = false;
-          ctx->pause_start = tsnow();
+        if (ch == 'p' && !ctx->paused) {
+          ts_paused = tsnow();
           ctx->paused = true;
+          ctx_print_status(ctx);
         }
 
-        if (ch == 'r') {
-          ctx->paused_time += tsnow() - ctx->pause_start;
+        if (ch == 'r' && ctx->paused) {
+          ctx->paused_time += tsnow() - ts_paused;
           ctx->paused = false;
+          ctx_print_status(ctx);
         }
       }
     }
@@ -861,6 +829,5 @@ int main(int argc, const char **argv) {
   if (ctx.cmd == CMD_MUL) cmd_mul(&ctx);
   if (ctx.cmd == CMD_RND) cmd_rnd(&ctx);
 
-  if (ctx.outfile != NULL) fclose(ctx.outfile);
   return 0;
 }

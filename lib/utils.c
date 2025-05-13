@@ -168,7 +168,7 @@ bool args_bool(args_t *args, const char *name) {
   return false;
 }
 
-u64 args_int(args_t *args, const char *name, int def) {
+u64 args_uint(args_t *args, const char *name, int def) {
   for (int i = 1; i < args->argc - 1; ++i) {
     if (strcmp(args->argv[i], name) == 0) {
       return strtoull(args->argv[i + 1], NULL, 10);
@@ -409,7 +409,7 @@ void __blf_gen_usage(args_t *args) {
 }
 
 void blf_gen(args_t *args) {
-  u64 n = args_int(args, "-n", 0);
+  u64 n = args_uint(args, "-n", 0);
   if (n == 0) {
     fprintf(stderr, "[!] missing filter size (-n <number>)\n");
     return __blf_gen_usage(args);

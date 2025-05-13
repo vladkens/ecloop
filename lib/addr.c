@@ -69,7 +69,6 @@ void prepare_rmd(u32 rs[16]) {
   for (int i = 0; i < 8; i++) rs[i] = swap32(rs[i]);
   rs[8] = 0x00000080;
   rs[14] = 256;
-  rs[15] = 0;
 }
 
 void addr33(u32 r[5], const pe *point) {
@@ -94,6 +93,8 @@ void addr65(u32 *r, const pe *point) {
   rmd160_final(r, rs);
 }
 
+// MARK: SIMD
+
 void addr33_batch(h160_t *hashes, const pe *points, size_t count) {
   assert(count <= HASH_BATCH_SIZE);
   u8 msg[HASH_BATCH_SIZE][64] = {0}; // sha256 payload
@@ -102,7 +103,12 @@ void addr33_batch(h160_t *hashes, const pe *points, size_t count) {
   for (size_t i = 0; i < count; ++i) prepare33(msg[i], points + i);
   for (size_t i = 0; i < count; ++i) sha256_final(rs[i], msg[i], sizeof(msg[i]));
 
-  for (size_t i = 0; i < count; ++i) prepare_rmd(rs[i]);
+  // for (size_t i = 0; i < count; ++i) prepare_rmd(rs[i]);
+  for (size_t i = 0; i < count; ++i) {
+    rs[i][8] = 0x80000000;  // 80 in little-endian
+    rs[i][14] = 0x00010000; // 256 in little-endian
+  }
+
   rmd160_batch(hashes, rs);
 }
 
@@ -114,6 +120,11 @@ void addr65_batch(h160_t *hashes, const pe *points, size_t count) {
   for (size_t i = 0; i < count; ++i) prepare65(msg[i], points + i);
   for (size_t i = 0; i < count; ++i) sha256_final(rs[i], msg[i], sizeof(msg[i]));
 
-  for (size_t i = 0; i < count; ++i) prepare_rmd(rs[i]);
+  // for (size_t i = 0; i < count; ++i) prepare_rmd(rs[i]);
+  for (size_t i = 0; i < count; ++i) {
+    rs[i][8] = 0x80000000;  // 80 in little-endian
+    rs[i][14] = 0x00010000; // 256 in little-endian
+  }
+
   rmd160_batch(hashes, rs);
 }
