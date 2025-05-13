@@ -12,7 +12,7 @@
 #include "lib/ecc.c"
 #include "lib/utils.c"
 
-#define VERSION "0.4.0"
+#define VERSION "0.4.1"
 #define MAX_JOB_SIZE 1024 * 1024 * 2
 #define GROUP_INV_SIZE 1024ul
 #define MAX_LINE_SIZE 128
@@ -129,8 +129,7 @@ void load_filter(ctx_t *ctx, const char *filepath) {
 
 // note: this function is not thread-safe; use mutex lock before calling
 void ctx_print_unlocked(ctx_t *ctx) {
-  char *msg =
-      ctx->finished ? "" : (ctx->paused ? " [Press 'r' to resume]" : " [Press 'p' to pause]");
+  char *msg = ctx->finished ? "" : (ctx->paused ? " ('r' – resume)" : " ('p' – pause)");
 
   int64_t effective_time = (int64_t)(ctx->ts_updated - ctx->ts_started) - (int64_t)ctx->paused_time;
   double dt = MAX(1, effective_time) / 1000.0;
@@ -515,6 +514,10 @@ void gen_random_range(ctx_t *ctx, const fe a, const fe b) {
     ctx->range_s[i / 64] &= ~(1ULL << (i % 64));
     ctx->range_e[i / 64] |= 1ULL << (i % 64);
   }
+
+  // put in bounds
+  if (fe_cmp(ctx->range_s, a) <= 0) fe_clone(ctx->range_s, a);
+  if (fe_cmp(ctx->range_e, b) >= 0) fe_clone(ctx->range_e, b);
 }
 
 void print_range_mask(fe range_s, u32 bits_size, u32 offset, bool use_color) {
@@ -566,6 +569,9 @@ void cmd_rnd(ctx_t *ctx) {
     print_range_mask(ctx->range_e, ctx->ord_size, ctx->ord_offs, ctx->use_color);
     ctx_print_status(ctx);
 
+    // if full range is used, skip break after first iteration
+    bool is_full = fe_cmp(ctx->range_s, range_s) == 0 && fe_cmp(ctx->range_e, range_e) == 0;
+
     for (size_t i = 0; i < ctx->threads_count; ++i) {
       pthread_create(&ctx->threads[i], NULL, cmd_add_worker, ctx);
     }
@@ -578,6 +584,8 @@ void cmd_rnd(ctx_t *ctx) {
     double dt = MAX((tsnow() - s_time), 1ul) / 1000.0;
     term_clear_line();
     printf("%'zu / %'zu ~ %.1fs\n\n", df, dc, dt);
+
+    if (is_full) break;
   }
 
   ctx_finish(ctx);
@@ -663,7 +671,7 @@ void load_offs_size(ctx_t *ctx, args_t *args) {
     exit(1);
   }
 
-  ctx->ord_offs = tmp_offs;
+  ctx->ord_offs = MIN(max_offs, tmp_offs);
   ctx->ord_size = tmp_size;
 }
 
@@ -845,6 +853,13 @@ int main(int argc, const char **argv) {
   ctx_t ctx;
   init(&ctx, &args);
 
+  // Save original terminal settings
+  struct termios original_termios;
+  int tty_fd = open("/dev/tty", O_RDONLY);
+  if (tty_fd >= 0) {
+    tcgetattr(tty_fd, &original_termios);
+  }
+
   pthread_t kb_thread;
   pthread_create(&kb_thread, NULL, kb_listener, &ctx);
   signal(SIGINT, handle_sigint); // Keep last progress line on Ctrl-C
@@ -852,6 +867,12 @@ int main(int argc, const char **argv) {
   if (ctx.cmd == CMD_ADD) cmd_add(&ctx);
   if (ctx.cmd == CMD_MUL) cmd_mul(&ctx);
   if (ctx.cmd == CMD_RND) cmd_rnd(&ctx);
+
+  // Restore terminal settings on exit
+  if (tty_fd >= 0) {
+    tcsetattr(tty_fd, TCSANOW, &original_termios);
+    close(tty_fd);
+  }
 
   return 0;
 }

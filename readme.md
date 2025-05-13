@@ -58,6 +58,10 @@ Other commands:
   bench-gtable    - run benchmark of ecc multiplication (with different table size)
 ```
 
+### Quick Start for Bitcoin Puzzles
+
+For a quick start with Bitcoin Puzzles, there are preconfigured make commands. Simply run them, and `ecloop` will start searching for the puzzle in random mode. For example, use `make 71` for puzzle 71, `make 72` for puzzle 72, and so on. If you are lucky and find a key, the result will be saved in the `found_N.txt` file. Shortcuts available for: `28`, `32`, `36`, `71`, `73`, `74`, `75`, `76`, `77`, `78`, `79`.
+
 ### Check keys in a given range (sequential addition)
 
 ```sh
@@ -169,14 +173,14 @@ _Note: This benchmark is run on a MacBook Pro M2._
 
 Here are the steps I followed to run `ecloop` on Windows:
 
-1. Open PowerShell.
-2. Run `wsl --install`.
+1. Open PowerShell
+2. Run `wsl --install`
 3. Restart Windows.
-4. Run `wsl --install Ubuntu` (this may not be necessary, as Ubuntu should be installed by default; this command hung when I tried it, so I continued in a new tab).
-5. Run `wsl -d Ubuntu`.
-6. Run `apt update && apt install build-essential git`.
-7. Run `git clone https://github.com/vladkens/ecloop.git && cd ecloop`.
-8. Run `make build`.
+4. Run `wsl --install Ubuntu` (this command hung when I tried it, so I continued in a new tab)
+5. Run `wsl -d Ubuntu`
+6. Run: `sudo apt update && sudo apt install -y build-essential git clang`
+7. Run `cd ~ && git clone https://github.com/vladkens/ecloop.git && cd ecloop`
+8. Run `make build`
 
 If no errors appear, `ecloop` has been compiled successfully and is ready to use. For example, you can run a benchmark with: `./ecloop bench`.
 
@@ -188,20 +192,20 @@ Tests were done on an Intel N100.
 
 ```sh
 > time ./keyhunt -m rmd160 -f ../ecloop/data/btc-puzzles-hash -r 8000:fffffff -t 1 -n 16777216
-3m57s ~ 1.13 MKeys/s
+3m54s ~ 1.14 MKeys/s
 
 > time ./ecloop add -f data/btc-puzzles-hash -t 1 -r 8000:fffffff
-1m27s ~ 3.08 MKeys/s
+1m18s ~ 3.44 MKeys/s
 ```
 
 ### Multiple threads
 
 ```sh
 > time ./keyhunt -m rmd160 -f ../ecloop/data/btc-puzzles-hash -r 8000:fffffff -t 4 -n 16777216
-1m33s ~ 3.88 MKeys/s
+1m32s ~ 2.91 MKeys/s
 
 > time ./ecloop add -f data/btc-puzzles-hash -t 4 -r 8000:fffffff
-0m33s ~ 8.13 MKeys/s
+0m29s ~ 9.10 MKeys/s
 ```
 
 ## Disclaimer

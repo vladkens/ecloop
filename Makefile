@@ -48,11 +48,19 @@ verify: build
 	./ecloop mult-verify
 
 # -----------------------------------------------------------------------------
+# https://btcpuzzle.info/puzzle
 
+range_28 = 8000000:fffffff
+range_32 = 80000000:ffffffff
+range_36 = 800000000:fffffffff
 range_71 = 400000000000000000:7fffffffffffffffff
 range_72 = 800000000000000000:ffffffffffffffffff
 range_73 = 1000000000000000000:1ffffffffffffffffff
 range_74 = 2000000000000000000:3ffffffffffffffffff
+range_76 = 8000000000000000000:fffffffffffffffffff
+range_77 = 10000000000000000000:1fffffffffffffffffff
+range_78 = 20000000000000000000:3fffffffffffffffffff
+range_79 = 40000000000000000000:7fffffffffffffffffff
 _RANGES_ = $(foreach r,$(filter range_%,$(.VARIABLES)),$(patsubst range_%,%,$r))
 
 puzzle: build
@@ -60,7 +68,7 @@ puzzle: build
 	./ecloop rnd -f data/btc-puzzles-hash -d 0:32 -r $(range_$(n)) -o ./found_$(n).txt
 
 %:
-	@$(if $(filter $(_RANGES_),$@),make puzzle n=$@,)
+	@$(if $(filter $(_RANGES_),$@),make -s puzzle n=$@,)
 
 # -----------------------------------------------------------------------------
 
