@@ -80,33 +80,51 @@ void load_filter(ctx_t *ctx, const char *filepath) {
   char *ext = strrchr(filepath, '.');
   if (ext != NULL && strcmp(ext, ".blf") == 0) {
     if (!blf_load(filepath, &ctx->blf)) exit(1);
-  } else {
-    size_t capacity = 32;
-    size_t size = 0;
-    u32 *hashes = malloc(capacity * sizeof(u32) * 5);
+    fclose(file);
+    return;
+  }
 
-    hex40 line;
-    while (fgets(line, sizeof(line), file)) {
-      if (strlen(line) != sizeof(line) - 1) continue;
+  size_t hlen = sizeof(u32) * 5;
+  assert(hlen == sizeof(h160_t));
+  size_t capacity = 32;
+  size_t size = 0;
+  u32 *hashes = malloc(capacity * hlen);
 
-      if (size >= capacity) {
-        capacity *= 2;
-        hashes = realloc(hashes, capacity * sizeof(u32) * 5);
-      }
+  hex40 line;
+  while (fgets(line, sizeof(line), file)) {
+    if (strlen(line) != sizeof(line) - 1) continue;
 
-      for (size_t j = 0; j < sizeof(line) - 1; j += 8) {
-        sscanf(line + j, "%8x", &hashes[size * 5 + j / 8]);
-      }
-
-      size += 1;
+    if (size >= capacity) {
+      capacity *= 2;
+      hashes = realloc(hashes, capacity * hlen);
     }
 
-    qsort(hashes, size, 5 * sizeof(u32), compare_160);
-    ctx->to_find_hashes = (h160_t *)hashes;
-    ctx->to_find_count = size;
+    for (size_t j = 0; j < sizeof(line) - 1; j += 8) {
+      sscanf(line + j, "%8x", &hashes[size * 5 + j / 8]);
+    }
+
+    size += 1;
   }
 
   fclose(file);
+  qsort(hashes, size, hlen, compare_160);
+
+  // remove duplicates
+  size_t unique_count = 0;
+  for (size_t i = 1; i < size; ++i) {
+    if (memcmp(&hashes[unique_count * 5], &hashes[i * 5], hlen) != 0) {
+      unique_count++;
+      memcpy(&hashes[unique_count * 5], &hashes[i * 5], hlen);
+    }
+  }
+
+  ctx->to_find_hashes = (h160_t *)hashes;
+  ctx->to_find_count = unique_count + 1;
+
+  // generate in-memory bloom filter
+  ctx->blf.size = ctx->to_find_count * 2;
+  ctx->blf.bits = malloc(ctx->blf.size * sizeof(u64));
+  for (size_t i = 0; i < ctx->to_find_count; ++i) blf_add(&ctx->blf, hashes + i * 5);
 }
 
 // note: this function is not thread-safe; use mutex lock before calling
@@ -183,13 +201,17 @@ void ctx_write_found(ctx_t *ctx, const char *label, const h160_t hash, const fe 
 }
 
 bool ctx_check_hash(ctx_t *ctx, const h160_t h) {
+  // bloom filter only mode
   if (ctx->to_find_hashes == NULL) {
     return blf_has(&ctx->blf, h);
-  } else {
-    h160_t *rs = bsearch(h, ctx->to_find_hashes, ctx->to_find_count, sizeof(h160_t), compare_160);
-    if (rs) return true;
   }
-  return false;
+
+  // check by hashes list
+  if (!blf_has(&ctx->blf, h)) return false; // fast check with bloom filter
+
+  // if bloom filter check passed, do full check
+  h160_t *rs = bsearch(h, ctx->to_find_hashes, ctx->to_find_count, sizeof(h160_t), compare_160);
+  return rs != NULL;
 }
 
 void ctx_precompute_gpoints(ctx_t *ctx) {
@@ -350,6 +372,7 @@ void cmd_add(ctx_t *ctx) {
   fe range_size;
   fe_modsub(range_size, ctx->range_e, ctx->range_s);
   ctx->job_size = fe_cmp64(range_size, MAX_JOB_SIZE) < 0 ? range_size[0] : MAX_JOB_SIZE;
+  ctx->ts_started = tsnow(); // actual start time
 
   for (size_t i = 0; i < ctx->threads_count; ++i) {
     pthread_create(&ctx->threads[i], NULL, cmd_add_worker, ctx);
@@ -526,6 +549,7 @@ void cmd_rnd(ctx_t *ctx) {
 
   ctx_precompute_gpoints(ctx);
   ctx->job_size = MAX_JOB_SIZE;
+  ctx->ts_started = tsnow(); // actual start time
 
   fe range_s, range_e;
   fe_clone(range_s, ctx->range_s);
@@ -730,7 +754,7 @@ void init(ctx_t *ctx, args_t *args) {
   ctx->k_checked = 0;
   ctx->k_found = 0;
   ctx->ts_started = tsnow();
-  ctx->ts_updated = ctx->ts_started + 1;
+  ctx->ts_updated = ctx->ts_started;
   ctx->ts_printed = ctx->ts_started - 5e3;
   ctx->paused_time = 0;
   ctx->paused = false;

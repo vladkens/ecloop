@@ -49,6 +49,21 @@ verify: build
 
 # -----------------------------------------------------------------------------
 
+range_71 = 400000000000000000:7fffffffffffffffff
+range_72 = 800000000000000000:ffffffffffffffffff
+range_73 = 1000000000000000000:1ffffffffffffffffff
+range_74 = 2000000000000000000:3ffffffffffffffffff
+_RANGES_ = $(foreach r,$(filter range_%,$(.VARIABLES)),$(patsubst range_%,%,$r))
+
+puzzle: build
+	@$(if $(filter $(_RANGES_),$(n)),,$(error "Invalid range $(n)"))
+	./ecloop rnd -f data/btc-puzzles-hash -d 0:32 -r $(range_$(n)) -o ./found_$(n).txt
+
+%:
+	@$(if $(filter $(_RANGES_),$@),make puzzle n=$@,)
+
+# -----------------------------------------------------------------------------
+
 host=mele
 cmd=add
 
