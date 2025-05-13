@@ -52,6 +52,9 @@ verify: build
 
 range_28 = 8000000:fffffff
 range_32 = 80000000:ffffffff
+range_33 = 100000000:1ffffffff
+range_34 = 200000000:3ffffffff
+range_35 = 400000000:7ffffffff
 range_36 = 800000000:fffffffff
 range_71 = 400000000000000000:7fffffffffffffffff
 range_72 = 800000000000000000:ffffffffffffffffff
@@ -68,7 +71,7 @@ puzzle: build
 	./ecloop rnd -f data/btc-puzzles-hash -d 0:32 -r $(range_$(n)) -o ./found_$(n).txt
 
 %:
-	@$(if $(filter $(_RANGES_),$@),make -s puzzle n=$@,)
+	@$(if $(filter $(_RANGES_),$@),make --no-print-directory puzzle n=$@,)
 
 # -----------------------------------------------------------------------------
 
@@ -76,6 +79,6 @@ host=mele
 cmd=add
 
 remote:
-	@ssh -tt $(host) '$(CC) --version'
-	@rsync -arc --delete-after --exclude={'ecloop'} ./ $(host):/tmp/ecloop
+	@rsync -arc --progress --delete-after --exclude={'ecloop','found*.txt'} ./ $(host):/tmp/ecloop
+	@ssh -tt $(host) 'clear; $(CC) --version'
 	ssh -tt $(host) 'cd /tmp/ecloop; make $(cmd) CC=$(CC)'
