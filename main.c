@@ -391,8 +391,9 @@ void check_found_mul(ctx_t *ctx, const fe *pk, const pe *cp, size_t count) {
   h160_t hs65[HASH_BATCH_SIZE];
 
   for (size_t i = 0; i < count; i += HASH_BATCH_SIZE) {
-    if (ctx->check_addr33) addr33_batch(hs33, cp + i, HASH_BATCH_SIZE);
-    if (ctx->check_addr65) addr65_batch(hs65, cp + i, HASH_BATCH_SIZE);
+    size_t batch_size = MIN(HASH_BATCH_SIZE, count - i);
+    if (ctx->check_addr33) addr33_batch(hs33, cp + i, batch_size);
+    if (ctx->check_addr65) addr65_batch(hs65, cp + i, batch_size);
 
     for (size_t j = 0; j < HASH_BATCH_SIZE; ++j) {
       if (ctx->check_addr33 && ctx_check_hash(ctx, hs33[j])) {
