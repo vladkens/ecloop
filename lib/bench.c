@@ -148,8 +148,7 @@ void mult_verify() {
   for (int i = 0; i < 1000 * 16; ++i) {
     fe_set64(pk, i + 2);
 
-    ec_jacobi_mul(&r1, &G1, pk);
-    ec_jacobi_rdc(&r1, &r1);
+    ec_jacobi_mulrdc(&r1, &G1, pk);
     ec_verify(&r1);
 
     ec_gtable_mul(&r2, pk);

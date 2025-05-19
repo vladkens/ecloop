@@ -14,5 +14,6 @@
     "ecloop": true
   },
   "prettier.requireConfig": false,
-  "ruff.lineLength": 99
+  "ruff.lineLength": 99,
+  "C_Cpp.dimInactiveRegions": false
 }

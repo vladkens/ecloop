@@ -31,6 +31,8 @@ static const fe P = {
     0xffffffffffffffff,
 };
 
+static const fe FE_ZERO = {0, 0, 0, 0};
+
 INLINE void fe_print(const char *label, const fe a) {
   printf("%s: %016llx %016llx %016llx %016llx\n", label, a[3], a[2], a[1], a[0]);
 }
@@ -58,9 +60,7 @@ void fe_add64(fe r, const u64 a) {
 }
 
 int fe_cmp64(const fe a, const u64 b) {
-  if (a[3] != 0) return 1;
-  if (a[2] != 0) return 1;
-  if (a[1] != 0) return 1;
+  if (a[3] != 0 || a[2] != 0 || a[1] != 0) return 1;
   if (a[0] != b) return a[0] > b ? 1 : -1;
   return 0;
 }
@@ -111,9 +111,6 @@ void fe_modadd(fe r, const fe a, const fe b) { // r = a + b (mod P)
     r[2] = subc64(r[2], P[2], c, &c);
     r[3] = subc64(r[3], P[3], c, &c);
   }
-
-  u64 f = (r[3] >= P[3] && r[2] >= P[2] && r[1] >= P[1] && r[0] >= P[0]);
-  if (f) printf("todo overflow: %llu ~ %llu\n", c, f);
 }
 
 void fe_mul_scalar(u64 r[5], const fe a, const u64 b) { // 256bit * 64bit -> 320bit
@@ -296,6 +293,13 @@ INLINE void fe_shiftr64(fe r, const u8 n) {
   r[3] = (r[3] >> n);
 }
 
+void fe_stride_add(fe r, const fe base, const fe stride, const u64 offset) {
+  fe t; // in case r and base are same pointer
+  fe_set64(t, offset);
+  fe_modmul(t, t, stride); // r = offset * stride
+  fe_modadd(r, t, base);   // r = offset * stride + base
+}
+
 void _fe_modinv_binpow(fe r, const fe a) {
   // a^(P-2) = a^-1 (mod P)
   // https://e-maxx.ru/algo/reverse_element https://e-maxx.ru/algo/binary_pow
@@ -373,25 +377,24 @@ void _fe_modinv_addchn(fe r, const fe a) {
 INLINE void fe_modinv(fe r, const fe a) { return _fe_modinv_addchn(r, a); }
 
 void fe_grpinv(fe r[], const u32 n) {
-  fe *zs = (fe *)malloc(n * sizeof(fe));
+  fe zs[n];
 
-  fe_clone(*zs, r[0]);
+  fe_clone(zs[0], r[0]);
   for (u32 i = 1; i < n; ++i) {
-    fe_modmul(*(zs + i), *(zs + (i - 1)), r[i]);
+    fe_modmul(zs[i], zs[i - 1], r[i]);
   }
 
   fe t1, t2;
-  fe_clone(t1, *(zs + (n - 1)));
+  fe_clone(t1, zs[n - 1]);
   fe_modinv(t1, t1);
 
   for (u32 i = n - 1; i > 0; --i) {
-    fe_modmul(t2, t1, *(zs + (i - 1)));
+    fe_modmul(t2, t1, zs[i - 1]);
     fe_modmul(t1, r[i], t1);
     fe_clone(r[i], t2);
   }
 
   fe_clone(r[0], t1);
-  free(zs);
 }
 
 void fe_from_hex(fe r, const char *hex) {
@@ -726,6 +729,23 @@ void ec_jacobi_mul(pe *r, const pe *p, const fe k) {
     }
     ec_jacobi_dbl(&t, &t);
   }
+}
+
+//
+
+INLINE void ec_jacobi_addrdc(pe *r, const pe *p, const pe *q) {
+  ec_jacobi_add(r, p, q);
+  ec_jacobi_rdc(r, r);
+}
+
+INLINE void ec_jacobi_mulrdc(pe *r, const pe *p, const fe k) {
+  ec_jacobi_mul(r, p, k);
+  ec_jacobi_rdc(r, r);
+}
+
+INLINE void ec_jacobi_dblrdc(pe *r, const pe *p) {
+  ec_jacobi_dbl(r, p);
+  ec_jacobi_rdc(r, r);
 }
 
 // MARK: EC GTable

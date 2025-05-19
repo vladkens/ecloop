@@ -1,8 +1,7 @@
 .PHONY: default clean build bench fmt add mul rnd blf remote
 
 CC = cc
-CC_FLAGS ?= -O3 -ffast-math
-# CC_FLAGS ?= -O3 -ffast-math -Wall -Wextra
+CC_FLAGS ?= -O3 -ffast-math -Wall -Wextra
 
 ifeq ($(shell uname -m),x86_64)
 	CC_FLAGS += -march=native -pthread -lpthread
@@ -79,6 +78,6 @@ host=mele
 cmd=add
 
 remote:
-	@rsync -arc --progress --delete-after --exclude={'ecloop','found*.txt'} ./ $(host):/tmp/ecloop
+	@rsync -arc --progress --delete-after --exclude={'ecloop','found*.txt','.git'} ./ $(host):/tmp/ecloop
 	@ssh -tt $(host) 'clear; $(CC) --version'
 	ssh -tt $(host) 'cd /tmp/ecloop; make $(cmd) CC=$(CC)'

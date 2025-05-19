@@ -56,7 +56,7 @@
                                               31, 30, 29, 28))
 
   #define RMD_LOAD(x, i)                                                                           \
-    _mm256_set_epi32(x[0][i], x[1][i], x[2][i], x[3][i], x[4][i], x[5][i], x[6][i], x[7][i])
+    _mm256_set_epi32(x[7][i], x[6][i], x[5][i], x[4][i], x[3][i], x[2][i], x[1][i], x[0][i])
 
   #define RMD_DUMP(r, s, i)                                                                        \
     do {                                                                                           \

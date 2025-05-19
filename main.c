@@ -14,7 +14,7 @@
 
 #define VERSION "0.4.1"
 #define MAX_JOB_SIZE 1024 * 1024 * 2
-#define GROUP_INV_SIZE 1024ul
+#define GROUP_INV_SIZE 2048ul
 #define MAX_LINE_SIZE 128
 
 static_assert(GROUP_INV_SIZE % HASH_BATCH_SIZE == 0,
@@ -49,9 +49,10 @@ typedef struct ctx_t {
   blf_t blf;
 
   // cmd add
-  fe range_s; // search range start
-  fe range_e; // search range end
-  fe gs;      // base step for G-point grid (2^offset)
+  fe range_s;  // search range start
+  fe range_e;  // search range end
+  fe stride_k; // precomputed stride key (step for G-points, 2^offset)
+  pe stride_p; // precomputed stride point (G * pk)
   pe gpoints[GROUP_INV_SIZE];
   size_t job_size;
 
@@ -214,30 +215,37 @@ bool ctx_check_hash(ctx_t *ctx, const h160_t h) {
 }
 
 void ctx_precompute_gpoints(ctx_t *ctx) {
-  // precompute gpoints (Gi, Gi*2, Gi*3, ...)
-  fe gs = {0};
-  fe_set64(gs, 1);
-  fe_shiftl(gs, ctx->ord_offs);
-  fe_clone(ctx->gs, gs);
+  // precalc addition step with stride (2^offset)
+  fe_set64(ctx->stride_k, 1);
+  fe_shiftl(ctx->stride_k, ctx->ord_offs);
+
+  fe t; // precalc stride point
+  fe_stride_add(t, FE_ZERO, ctx->stride_k, GROUP_INV_SIZE);
+  ec_jacobi_mulrdc(&ctx->stride_p, &G1, t); // G * (GROUP_INV_SIZE * gs)
 
   pe g1, g2;
-  ec_jacobi_mul(&g1, &G1, gs);
-  ec_jacobi_dbl(&g2, &g1); // ecc can't calc Gi + Gi directly, so DBL(Gi) used
-  ec_jacobi_rdc(&g1, &g1);
-  ec_jacobi_rdc(&g2, &g2);
+  ec_jacobi_mulrdc(&g1, &G1, ctx->stride_k);
+  ec_jacobi_dblrdc(&g2, &g1);
 
-  memcpy(ctx->gpoints + 0, &g1, sizeof(pe));
-  memcpy(ctx->gpoints + 1, &g2, sizeof(pe));
-  for (size_t i = 2; i < GROUP_INV_SIZE; ++i) {
-    ec_jacobi_add(ctx->gpoints + i, ctx->gpoints + i - 1, &g1);
-    ec_jacobi_rdc(ctx->gpoints + i, ctx->gpoints + i);
+  size_t hsize = GROUP_INV_SIZE / 2;
+
+  // K+1, K+2, .., K+N/2-1
+  pe_clone(ctx->gpoints + 0, &g1);
+  pe_clone(ctx->gpoints + 1, &g2);
+  for (size_t i = 2; i < hsize; ++i) {
+    ec_jacobi_addrdc(ctx->gpoints + i, ctx->gpoints + i - 1, &g1);
+  }
+
+  // K-1, K-2, .., K-N/2
+  for (size_t i = 0; i < hsize; ++i) {
+    pe_clone(&ctx->gpoints[hsize + i], &ctx->gpoints[i]);
+    fe_modneg(ctx->gpoints[hsize + i].y, ctx->gpoints[i].y); // y = -y
   }
 }
 
 void pk_verify_hash(const fe pk, const h160_t hash, bool compressed) {
   pe point;
-  ec_jacobi_mul(&point, &G1, pk);
-  ec_jacobi_rdc(&point, &point);
+  ec_jacobi_mulrdc(&point, &G1, pk);
 
   h160_t h;
   compressed ? addr33(h, &point) : addr65(h, &point);
@@ -254,82 +262,85 @@ void pk_verify_hash(const fe pk, const h160_t hash, bool compressed) {
 
 // MARK: CMD_ADD
 
-void check_found_add(ctx_t *ctx, fe ck, const pe *points) {
+void check_found_add(ctx_t *ctx, fe const start_pk, const pe *points) {
   h160_t hs33[HASH_BATCH_SIZE];
   h160_t hs65[HASH_BATCH_SIZE];
+  fe ck;
 
   for (size_t i = 0; i < GROUP_INV_SIZE; i += HASH_BATCH_SIZE) {
     if (ctx->check_addr33) addr33_batch(hs33, points + i, HASH_BATCH_SIZE);
     if (ctx->check_addr65) addr65_batch(hs65, points + i, HASH_BATCH_SIZE);
 
     for (size_t j = 0; j < HASH_BATCH_SIZE; ++j) {
-      fe_modadd(ck, ck, ctx->gs);
 
       if (ctx->check_addr33 && ctx_check_hash(ctx, hs33[j])) {
-        // pk_verify_hash(ck, hs33[j], true);
-        ctx_write_found(ctx, "addr33", hs33[j], ck);
+        fe_stride_add(ck, start_pk, ctx->stride_k, i + j);
+        pk_verify_hash(ck, hs33[j], true);
+        ctx_write_found(ctx, "addr33", hs33[j], start_pk);
       }
 
       if (ctx->check_addr65 && ctx_check_hash(ctx, hs65[j])) {
-        // pk_verify_hash(ck, hs65[j], false);
-        ctx_write_found(ctx, "addr65", hs65[j], ck);
+        fe_stride_add(ck, start_pk, ctx->stride_k, i + j);
+        pk_verify_hash(ck, hs65[j], false);
+        ctx_write_found(ctx, "addr65", hs65[j], start_pk);
       }
     }
   }
 }
 
 void batch_add(ctx_t *ctx, const fe pk, const size_t iterations) {
-  size_t dx_size = MIN(GROUP_INV_SIZE, iterations);
+  size_t hsize = GROUP_INV_SIZE / 2;
 
-  fe ck, ss, rx, ry;
-  fe dx[dx_size], di[dx_size];
-  memcpy(ck, pk, sizeof(ck));
+  pe bp[GROUP_INV_SIZE]; // calculated ec points
+  fe dx[hsize];          // delta x for group inversion
+  pe GStart;             // iteration points
+  fe ck, rx, ry;         // current start point; tmp for x3, y3
+  fe ss, dd;             // temp variables
 
-  pe start_point, check_point;
-  pe bp[dx_size];
-  ec_jacobi_mul(&start_point, &G1, ck);
-  ec_jacobi_rdc(&start_point, &start_point);
-  memcpy(&check_point, &start_point, sizeof(pe));
+  // set start point to center of the group
+  fe_stride_add(ss, pk, ctx->stride_k, hsize);
+  ec_jacobi_mulrdc(&GStart, &G1, ss); // G * (pk + hsize * gs)
+
+  // group addition with single inversion (with stride support)
+  // structure: K-N/2 .. K-2 K-1 [K] K+1 K+2 .. K+N/2-1 (last K dropped to have odd size)
+  // points in `bp` already order by `pk` increment
+  fe_clone(ck, pk); // start pk for current iteration
 
   size_t counter = 0;
   while (counter < iterations) {
-    for (size_t i = 0; i < dx_size; ++i) {
-      fe_modsub(dx[i], ctx->gpoints[i].x, start_point.x);
+    for (size_t i = 0; i < hsize; ++i) fe_modsub(dx[i], ctx->gpoints[i].x, GStart.x);
+    fe_grpinv(dx, hsize);
+
+    pe_clone(&bp[hsize + 0], &GStart); // set K value
+
+    for (size_t D = 0; D < 2; ++D) {
+      bool positive = D == 0;
+      size_t g_idx = positive ? 0 : hsize; // plus points in first half, minus in second half
+      size_t g_max = positive ? hsize - 1 : hsize; // skip K+N/2, since we don't need it
+      for (size_t i = 0; i < g_max; ++i) {
+        fe_modsub(ss, ctx->gpoints[g_idx + i].y, GStart.y); // y2 - y1
+        fe_modmul(ss, ss, dx[i]);                           // λ = (y2 - y1) / (x2 - x1)
+        fe_modsqr(rx, ss);                                  // λ²
+        fe_modsub(rx, rx, GStart.x);                        // λ² - x1
+        fe_modsub(rx, rx, ctx->gpoints[g_idx + i].x);       // rx = λ² - x1 - x2
+        fe_modsub(dd, GStart.x, rx);                        // x1 - rx
+        fe_modmul(dd, ss, dd);                              // λ * (x1 - rx)
+        fe_modsub(ry, dd, GStart.y);                        // ry = λ * (x1 - rx) - y1
+
+        // ordered by pk:
+        // [0]: K-N/2, [1]: K-N/2+1, .., [N/2-1]: K-1 // all minus points
+        // [N/2]: K, [N/2+1]: K+1, .., [N-1]: K+N/2-1 // K, plus points without last element
+        size_t idx = positive ? hsize + i + 1 : hsize - 1 - i;
+        fe_clone(bp[idx].x, rx);
+        fe_clone(bp[idx].y, ry);
+        fe_set64(bp[idx].z, 0x1);
+      }
     }
 
-    memcpy(di, dx, sizeof(dx));
-    fe_grpinv(di, dx_size);
-
-    for (size_t i = 0; i < dx_size; ++i) {
-      fe_modsub(ss, ctx->gpoints[i].y, start_point.y);
-      fe_modmul(ss, ss, di[i]); // λ = (y2 - y1) / (x2 - x1)
-
-      fe_modsqr(rx, ss);
-      fe_modsub(rx, rx, start_point.x);
-      fe_modsub(rx, rx, ctx->gpoints[i].x); // rx = λ² - x1 - x2
-
-      fe_modsub(ry, ctx->gpoints[i].x, rx);
-      fe_modmul(ry, ss, ry);
-      fe_modsub(ry, ry, ctx->gpoints[i].y); // ry = λ(x1 - x3) - y1
-
-      fe_clone(bp[i].x, rx);
-      fe_clone(bp[i].y, ry);
-      fe_set64(bp[i].z, 0x1);
-
-      // ec_jacobi_add(&check_point, &check_point, &ctx->gpoints[0]);
-      // ec_jacobi_rdc(&check_point, &check_point);
-      // if (fe_cmp(rx, check_point.x) != 0 || fe_cmp(ry, check_point.y) != 0) {
-      //   printf("error on 0x%llx\n", counter + i);
-      //   exit(1);
-      // }
-    }
-
-    // note: ck will be modified in check_found_add
     check_found_add(ctx, ck, bp);
-
-    memcpy(&start_point, &bp[dx_size - 1], sizeof(pe));
-    counter += dx_size;
-    ctx_check_paused(ctx);
+    fe_stride_add(ck, ck, ctx->stride_k, GROUP_INV_SIZE); // move pk to next group START
+    ec_jacobi_addrdc(&GStart, &GStart, &ctx->stride_p);   // move GStart to next group CENTER
+    counter += GROUP_INV_SIZE;
   }
 }
 
@@ -343,7 +354,7 @@ void *cmd_add_worker(void *arg) {
   // for example: 3013 3023 .. 30X3 .. 3093 3103 3113
   fe inc = {0};
   fe_set64(inc, ctx->job_size);
-  fe_modmul(inc, inc, ctx->gs);
+  fe_modmul(inc, inc, ctx->stride_k);
 
   fe pk;
   while (true) {
@@ -790,13 +801,6 @@ void init(ctx_t *ctx, args_t *args) {
   printf("----------------------------------------\n");
 }
 
-void handle_sigint(int sig) {
-  fflush(stderr);
-  fflush(stdout);
-  printf("\n");
-  exit(sig);
-}
-
 void *kb_listener(void *arg) {
   ctx_t *ctx = (ctx_t *)arg;
 
@@ -846,19 +850,38 @@ void *kb_listener(void *arg) {
   return NULL;
 }
 
+struct termios _original_termios;
+int _tty_fd = -1;
+
+void cleanup() {
+  // restore terminal settings on exit
+  if (_tty_fd >= 0) {
+    tcsetattr(_tty_fd, TCSANOW, &_original_termios);
+    close(_tty_fd);
+  }
+}
+
+void handle_sigint(int sig) {
+  fflush(stderr);
+  fflush(stdout);
+  printf("\n");
+  cleanup();
+  exit(sig);
+}
+
 int main(int argc, const char **argv) {
   // https://stackoverflow.com/a/11695246
   setlocale(LC_NUMERIC, ""); // for comma separated numbers
   args_t args = {argc, argv};
 
-  ctx_t ctx;
+  ctx_t ctx = {0};
   init(&ctx, &args);
 
-  // Save original terminal settings
-  struct termios original_termios;
-  int tty_fd = open("/dev/tty", O_RDONLY);
-  if (tty_fd >= 0) {
-    tcgetattr(tty_fd, &original_termios);
+  // save original terminal settings
+  atexit(cleanup);
+  int _tty_fd = open("/dev/tty", O_RDONLY);
+  if (_tty_fd >= 0) {
+    tcgetattr(_tty_fd, &_original_termios);
   }
 
   pthread_t kb_thread;
@@ -868,12 +891,6 @@ int main(int argc, const char **argv) {
   if (ctx.cmd == CMD_ADD) cmd_add(&ctx);
   if (ctx.cmd == CMD_MUL) cmd_mul(&ctx);
   if (ctx.cmd == CMD_RND) cmd_rnd(&ctx);
-
-  // Restore terminal settings on exit
-  if (tty_fd >= 0) {
-    tcsetattr(tty_fd, TCSANOW, &original_termios);
-    close(tty_fd);
-  }
 
   return 0;
 }

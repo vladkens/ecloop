@@ -11,7 +11,7 @@
 #include "rmd160s.c"
 #include "sha256.c"
 
-#define HASH_BATCH_SIZE RMD_LEN
+#define HASH_BATCH_SIZE ((size_t)RMD_LEN)
 typedef u32 h160_t[5];
 
 int compare_160(const void *a, const void *b) {
