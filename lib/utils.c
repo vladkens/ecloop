@@ -130,8 +130,8 @@ void fe_urand(fe r) {
 
 void fe_rand_range(fe r, const fe a, const fe b, bool urandom) {
   fe range, x;
-  fe_modsub(range, b, a); // range = b - a
-  fe_add64(range, 1);     // range = range + 1
+  fe_modn_sub(range, b, a); // range = b - a
+  fe_add64(range, 1);       // range = range + 1
 
   size_t bits = fe_bitlen(range);
   assert(bits > 0 && bits <= 256);
@@ -148,7 +148,7 @@ void fe_rand_range(fe r, const fe a, const fe b, bool urandom) {
 
   } while (fe_cmp(x, range) >= 0);
 
-  fe_modadd(x, x, a);
+  fe_modn_add(x, x, a);
   assert(fe_cmp(x, a) >= 0);
   assert(fe_cmp(x, b) <= 0);
   fe_clone(r, x);
@@ -460,11 +460,13 @@ void blf_gen(args_t *args) {
     h160_t hash;
     for (size_t j = 0; j < sizeof(line) - 1; j += 8) sscanf(line + j, "%8x", &hash[j / 8]);
 
-    count += 1;
+    if (blf_has(&blf, hash)) continue;
+
     blf_add(&blf, hash);
+    count += 1;
   }
 
-  printf("added %'llu items; saving to %s\n", count, filepath);
+  printf("added %'llu new items; saving to %s\n", count, filepath);
 
   if (!blf_save(filepath, &blf)) {
     fprintf(stderr, "[!] failed to save bloom filter\n");

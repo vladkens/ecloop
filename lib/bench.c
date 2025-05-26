@@ -87,12 +87,12 @@ void run_bench() {
   iters = 1000 * 100;
 
   stime = tsnow();
-  for (i = 0; i < iters; ++i) _fe_modinv_binpow(f, g.x);
+  for (i = 0; i < iters; ++i) _fe_modp_inv_binpow(f, g.x);
   print_res("_fe_modinv_binpow", stime, iters);
   assert(fe_cmp(f, G1.x) != 0);
 
   stime = tsnow();
-  for (i = 0; i < iters; ++i) _fe_modinv_addchn(f, g.x);
+  for (i = 0; i < iters; ++i) _fe_modp_inv_addchn(f, g.x);
   print_res("_fe_modinv_addchn", stime, iters);
   assert(fe_cmp(f, G1.x) != 0);
 
@@ -124,7 +124,7 @@ void run_bench_gtable() {
 
   size_t mem_used;
   for (int i = 8; i <= 22; i += 2) {
-    GTABLE_W = i;
+    _GTABLE_W = i;
 
     stime = tsnow();
     mem_used = ec_gtable_init();

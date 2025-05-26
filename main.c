@@ -12,10 +12,10 @@
 #include "lib/ecc.c"
 #include "lib/utils.c"
 
-#define VERSION "0.4.1"
+#define VERSION "0.5.0"
 #define MAX_JOB_SIZE 1024 * 1024 * 2
 #define GROUP_INV_SIZE 2048ul
-#define MAX_LINE_SIZE 128
+#define MAX_LINE_SIZE 1025
 
 static_assert(GROUP_INV_SIZE % HASH_BATCH_SIZE == 0,
               "GROUP_INV_SIZE must be divisible by HASH_BATCH_SIZE");
@@ -31,6 +31,7 @@ typedef struct ctx_t {
   size_t k_found;
   bool check_addr33;
   bool check_addr65;
+  bool use_endo;
 
   FILE *outfile;
   bool quiet;
@@ -220,7 +221,7 @@ void ctx_precompute_gpoints(ctx_t *ctx) {
   fe_shiftl(ctx->stride_k, ctx->ord_offs);
 
   fe t; // precalc stride point
-  fe_stride_add(t, FE_ZERO, ctx->stride_k, GROUP_INV_SIZE);
+  fe_modn_add_stride(t, FE_ZERO, ctx->stride_k, GROUP_INV_SIZE);
   ec_jacobi_mulrdc(&ctx->stride_p, &G1, t); // G * (GROUP_INV_SIZE * gs)
 
   pe g1, g2;
@@ -239,20 +240,20 @@ void ctx_precompute_gpoints(ctx_t *ctx) {
   // K-1, K-2, .., K-N/2
   for (size_t i = 0; i < hsize; ++i) {
     pe_clone(&ctx->gpoints[hsize + i], &ctx->gpoints[i]);
-    fe_modneg(ctx->gpoints[hsize + i].y, ctx->gpoints[i].y); // y = -y
+    fe_modp_neg(ctx->gpoints[hsize + i].y, ctx->gpoints[i].y); // y = -y
   }
 }
 
-void pk_verify_hash(const fe pk, const h160_t hash, bool compressed) {
+void pk_verify_hash(const fe pk, const h160_t hash, bool c, size_t endo) {
   pe point;
   ec_jacobi_mulrdc(&point, &G1, pk);
 
   h160_t h;
-  compressed ? addr33(h, &point) : addr65(h, &point);
+  c ? addr33(h, &point) : addr65(h, &point);
 
   bool is_equal = memcmp(h, hash, sizeof(h160_t)) == 0;
   if (!is_equal) {
-    fprintf(stderr, "[!] error: hash mismatch (compressed: %d)\n", compressed);
+    fprintf(stderr, "[!] error: hash mismatch (compressed: %d endo: %zu)\n", c, endo);
     fprintf(stderr, "pk: %016llx%016llx%016llx%016llx\n", pk[3], pk[2], pk[1], pk[0]);
     fprintf(stderr, "lh: %08x%08x%08x%08x%08x\n", hash[0], hash[1], hash[2], hash[3], hash[4]);
     fprintf(stderr, "rh: %08x%08x%08x%08x%08x\n", h[0], h[1], h[2], h[3], h[4]);
@@ -262,30 +263,86 @@ void pk_verify_hash(const fe pk, const h160_t hash, bool compressed) {
 
 // MARK: CMD_ADD
 
+void calc_priv(fe pk, const fe start_pk, const fe stride_k, size_t pk_off, u8 endo) {
+  fe_modn_add_stride(pk, start_pk, stride_k, pk_off);
+
+  if (endo == 0) return;
+  if (endo == 1) fe_modn_neg(pk, pk);
+  if (endo == 2 || endo == 3) fe_modn_mul(pk, pk, A1);
+  if (endo == 3) fe_modn_neg(pk, pk);
+  if (endo == 4 || endo == 5) fe_modn_mul(pk, pk, A2);
+  if (endo == 5) fe_modn_neg(pk, pk);
+}
+
+void check_hash(ctx_t *ctx, bool c, const h160_t h, const fe start_pk, u64 pk_off, size_t endo) {
+  if (!ctx_check_hash(ctx, h)) return;
+
+  fe ck;
+  calc_priv(ck, start_pk, ctx->stride_k, pk_off, endo);
+  pk_verify_hash(ck, h, c, endo);
+  ctx_write_found(ctx, c ? "addr33" : "addr65", h, ck);
+}
+
 void check_found_add(ctx_t *ctx, fe const start_pk, const pe *points) {
   h160_t hs33[HASH_BATCH_SIZE];
   h160_t hs65[HASH_BATCH_SIZE];
-  fe ck;
 
   for (size_t i = 0; i < GROUP_INV_SIZE; i += HASH_BATCH_SIZE) {
     if (ctx->check_addr33) addr33_batch(hs33, points + i, HASH_BATCH_SIZE);
     if (ctx->check_addr65) addr65_batch(hs65, points + i, HASH_BATCH_SIZE);
-
     for (size_t j = 0; j < HASH_BATCH_SIZE; ++j) {
+      if (ctx->check_addr33) check_hash(ctx, true, hs33[j], start_pk, i + j, 0);
+      if (ctx->check_addr33) check_hash(ctx, false, hs65[j], start_pk, i + j, 0);
+    }
+  }
 
-      if (ctx->check_addr33 && ctx_check_hash(ctx, hs33[j])) {
-        fe_stride_add(ck, start_pk, ctx->stride_k, i + j);
-        pk_verify_hash(ck, hs33[j], true);
-        ctx_write_found(ctx, "addr33", hs33[j], start_pk);
-      }
+  if (!ctx->use_endo) return;
 
-      if (ctx->check_addr65 && ctx_check_hash(ctx, hs65[j])) {
-        fe_stride_add(ck, start_pk, ctx->stride_k, i + j);
-        pk_verify_hash(ck, hs65[j], false);
-        ctx_write_found(ctx, "addr65", hs65[j], start_pk);
+  // https://bitcointalk.org/index.php?topic=5527935.msg65000919#msg65000919
+  // PubKeys  = (x,y) (x,-y) (x*beta,y) (x*beta,-y) (x*beta^2,y) (x*beta^2,-y)
+  // PrivKeys = (pk) (!pk) (pk*alpha) !(pk*alpha) (pk*alpha^2) !(pk*alpha^2)
+
+  size_t esize = HASH_BATCH_SIZE * 5;
+  pe endos[esize];
+  for (size_t i = 0; i < esize; ++i) fe_set64(endos[i].z, 1);
+
+  size_t ci = 0;
+  for (size_t k = 0; k < GROUP_INV_SIZE; ++k) {
+    size_t idx = (k * 5) % esize;
+
+    fe_clone(endos[idx + 0].x, points[k].x); // (x, -y)
+    fe_modp_neg(endos[idx + 0].y, points[k].y);
+
+    fe_modp_mul(endos[idx + 1].x, points[k].x, B1); // (x * beta, y)
+    fe_clone(endos[idx + 1].y, points[k].y);
+
+    fe_clone(endos[idx + 2].x, endos[idx + 1].x); // (x * beta, -y)
+    fe_clone(endos[idx + 2].y, endos[idx + 0].y);
+
+    fe_modp_mul(endos[idx + 3].x, points[k].x, B2); // (x * beta^2, y)
+    fe_clone(endos[idx + 3].y, points[k].y);
+
+    fe_clone(endos[idx + 4].x, endos[idx + 3].x); // (x * beta^2, -y)
+    fe_clone(endos[idx + 4].y, endos[idx + 0].y);
+
+    bool is_full = (idx + 5) % esize == 0 || k == GROUP_INV_SIZE - 1;
+    if (!is_full) continue;
+
+    for (size_t i = 0; i < esize; i += HASH_BATCH_SIZE) {
+      if (ctx->check_addr33) addr33_batch(hs33, endos + i, HASH_BATCH_SIZE);
+      if (ctx->check_addr65) addr65_batch(hs65, endos + i, HASH_BATCH_SIZE);
+
+      for (size_t j = 0; j < HASH_BATCH_SIZE; ++j) {
+        // if (ci >= (GROUP_INV_SIZE * 5)) break;
+        // printf(">> %6zu | %6zu ~ %zu\n", ci, ci / 5, (ci % 5) + 1);
+        if (ctx->check_addr33) check_hash(ctx, true, hs33[j], start_pk, ci / 5, (ci % 5) + 1);
+        if (ctx->check_addr65) check_hash(ctx, false, hs65[j], start_pk, ci / 5, (ci % 5) + 1);
+        ci += 1;
       }
     }
   }
+
+  assert(ci == GROUP_INV_SIZE * 5);
 }
 
 void batch_add(ctx_t *ctx, const fe pk, const size_t iterations) {
@@ -298,7 +355,7 @@ void batch_add(ctx_t *ctx, const fe pk, const size_t iterations) {
   fe ss, dd;             // temp variables
 
   // set start point to center of the group
-  fe_stride_add(ss, pk, ctx->stride_k, hsize);
+  fe_modn_add_stride(ss, pk, ctx->stride_k, hsize);
   ec_jacobi_mulrdc(&GStart, &G1, ss); // G * (pk + hsize * gs)
 
   // group addition with single inversion (with stride support)
@@ -308,8 +365,8 @@ void batch_add(ctx_t *ctx, const fe pk, const size_t iterations) {
 
   size_t counter = 0;
   while (counter < iterations) {
-    for (size_t i = 0; i < hsize; ++i) fe_modsub(dx[i], ctx->gpoints[i].x, GStart.x);
-    fe_grpinv(dx, hsize);
+    for (size_t i = 0; i < hsize; ++i) fe_modp_sub(dx[i], ctx->gpoints[i].x, GStart.x);
+    fe_modp_grpinv(dx, hsize);
 
     pe_clone(&bp[hsize + 0], &GStart); // set K value
 
@@ -318,14 +375,14 @@ void batch_add(ctx_t *ctx, const fe pk, const size_t iterations) {
       size_t g_idx = positive ? 0 : hsize; // plus points in first half, minus in second half
       size_t g_max = positive ? hsize - 1 : hsize; // skip K+N/2, since we don't need it
       for (size_t i = 0; i < g_max; ++i) {
-        fe_modsub(ss, ctx->gpoints[g_idx + i].y, GStart.y); // y2 - y1
-        fe_modmul(ss, ss, dx[i]);                           // λ = (y2 - y1) / (x2 - x1)
-        fe_modsqr(rx, ss);                                  // λ²
-        fe_modsub(rx, rx, GStart.x);                        // λ² - x1
-        fe_modsub(rx, rx, ctx->gpoints[g_idx + i].x);       // rx = λ² - x1 - x2
-        fe_modsub(dd, GStart.x, rx);                        // x1 - rx
-        fe_modmul(dd, ss, dd);                              // λ * (x1 - rx)
-        fe_modsub(ry, dd, GStart.y);                        // ry = λ * (x1 - rx) - y1
+        fe_modp_sub(ss, ctx->gpoints[g_idx + i].y, GStart.y); // y2 - y1
+        fe_modp_mul(ss, ss, dx[i]);                           // λ = (y2 - y1) / (x2 - x1)
+        fe_modp_sqr(rx, ss);                                  // λ²
+        fe_modp_sub(rx, rx, GStart.x);                        // λ² - x1
+        fe_modp_sub(rx, rx, ctx->gpoints[g_idx + i].x);       // rx = λ² - x1 - x2
+        fe_modp_sub(dd, GStart.x, rx);                        // x1 - rx
+        fe_modp_mul(dd, ss, dd);                              // λ * (x1 - rx)
+        fe_modp_sub(ry, dd, GStart.y);                        // ry = λ * (x1 - rx) - y1
 
         // ordered by pk:
         // [0]: K-N/2, [1]: K-N/2+1, .., [N/2-1]: K-1 // all minus points
@@ -338,8 +395,8 @@ void batch_add(ctx_t *ctx, const fe pk, const size_t iterations) {
     }
 
     check_found_add(ctx, ck, bp);
-    fe_stride_add(ck, ck, ctx->stride_k, GROUP_INV_SIZE); // move pk to next group START
-    ec_jacobi_addrdc(&GStart, &GStart, &ctx->stride_p);   // move GStart to next group CENTER
+    fe_modn_add_stride(ck, ck, ctx->stride_k, GROUP_INV_SIZE); // move pk to next group START
+    ec_jacobi_addrdc(&GStart, &GStart, &ctx->stride_p);        // move GStart to next group CENTER
     counter += GROUP_INV_SIZE;
   }
 }
@@ -354,7 +411,7 @@ void *cmd_add_worker(void *arg) {
   // for example: 3013 3023 .. 30X3 .. 3093 3103 3113
   fe inc = {0};
   fe_set64(inc, ctx->job_size);
-  fe_modmul(inc, inc, ctx->stride_k);
+  fe_modn_mul(inc, inc, ctx->stride_k);
 
   fe pk;
   while (true) {
@@ -366,11 +423,11 @@ void *cmd_add_worker(void *arg) {
     }
 
     fe_clone(pk, ctx->range_s);
-    fe_modadd(ctx->range_s, ctx->range_s, inc);
+    fe_modn_add(ctx->range_s, ctx->range_s, inc);
     pthread_mutex_unlock(&ctx->lock);
 
     batch_add(ctx, pk, ctx->job_size);
-    ctx_update(ctx, ctx->job_size);
+    ctx_update(ctx, ctx->use_endo ? ctx->job_size * 6 : ctx->job_size);
   }
 
   return NULL;
@@ -380,7 +437,7 @@ void cmd_add(ctx_t *ctx) {
   ctx_precompute_gpoints(ctx);
 
   fe range_size;
-  fe_modsub(range_size, ctx->range_e, ctx->range_s);
+  fe_modn_sub(range_size, ctx->range_e, ctx->range_s);
   ctx->job_size = fe_cmp64(range_size, MAX_JOB_SIZE) < 0 ? range_size[0] : MAX_JOB_SIZE;
   ctx->ts_started = tsnow(); // actual start time
 
@@ -397,23 +454,23 @@ void cmd_add(ctx_t *ctx) {
 
 // MARK: CMD_MUL
 
-void check_found_mul(ctx_t *ctx, const fe *pk, const pe *cp, size_t count) {
+void check_found_mul(ctx_t *ctx, const fe *pk, const pe *cp, size_t cnt) {
   h160_t hs33[HASH_BATCH_SIZE];
   h160_t hs65[HASH_BATCH_SIZE];
 
-  for (size_t i = 0; i < count; i += HASH_BATCH_SIZE) {
-    size_t batch_size = MIN(HASH_BATCH_SIZE, count - i);
+  for (size_t i = 0; i < cnt; i += HASH_BATCH_SIZE) {
+    size_t batch_size = MIN(HASH_BATCH_SIZE, cnt - i);
     if (ctx->check_addr33) addr33_batch(hs33, cp + i, batch_size);
     if (ctx->check_addr65) addr65_batch(hs65, cp + i, batch_size);
 
     for (size_t j = 0; j < HASH_BATCH_SIZE; ++j) {
       if (ctx->check_addr33 && ctx_check_hash(ctx, hs33[j])) {
-        // pk_verify_hash(pk[i + j], hs33[j], true);
+        // pk_verify_hash(pk[i + j], hs33[j], true, 0);
         ctx_write_found(ctx, "addr33", hs33[j], pk[i + j]);
       }
 
       if (ctx->check_addr65 && ctx_check_hash(ctx, hs65[j])) {
-        // pk_verify_hash(pk[i + j], hs65[j], false);
+        // pk_verify_hash(pk[i + j], hs65[j], false, 0);
         ctx_write_found(ctx, "addr65", hs65[j], pk[i + j]);
       }
     }
@@ -443,7 +500,7 @@ void *cmd_mul_worker(void *arg) {
 
     // parse private keys from hex string
     if (!ctx->raw_text) {
-      for (size_t i = 0; i < job->count; ++i) fe_from_hex(pk[i], job->lines[i]);
+      for (size_t i = 0; i < job->count; ++i) fe_modn_from_hex(pk[i], job->lines[i]);
     } else {
       for (size_t i = 0; i < job->count; ++i) {
         size_t len = strlen(job->lines[i]);
@@ -609,7 +666,7 @@ void arg_search_range(args_t *args, fe range_s, fe range_e) {
   char *raw = arg_str(args, "-r");
   if (!raw) {
     fe_set64(range_s, GROUP_INV_SIZE);
-    fe_clone(range_e, P);
+    fe_clone(range_e, FE_P);
     return;
   }
 
@@ -620,19 +677,19 @@ void arg_search_range(args_t *args, fe range_s, fe range_e) {
   }
 
   *sep = 0;
-  fe_from_hex(range_s, raw);
-  fe_from_hex(range_e, sep + 1);
+  fe_modn_from_hex(range_s, raw);
+  fe_modn_from_hex(range_e, sep + 1);
 
   // if (fe_cmp64(range_s, GROUP_INV_SIZE) <= 0) fe_set64(range_s, GROUP_INV_SIZE + 1);
-  // if (fe_cmp(range_e, P) > 0) fe_clone(range_e, P);
+  // if (fe_cmp(range_e, FE_P) > 0) fe_clone(range_e, FE_P);
 
   if (fe_cmp64(range_s, GROUP_INV_SIZE) <= 0) {
     fprintf(stderr, "invalid search range, start <= %#lx\n", GROUP_INV_SIZE);
     exit(1);
   }
 
-  if (fe_cmp(range_e, P) > 0) {
-    fprintf(stderr, "invalid search range, end > P\n");
+  if (fe_cmp(range_e, FE_P) > 0) {
+    fprintf(stderr, "invalid search range, end > FE_P\n");
     exit(1);
   }
 
@@ -742,6 +799,7 @@ void init(ctx_t *ctx, args_t *args) {
   if (seed != NULL) {
     ctx->has_seed = true;
     srand(encode_seed(seed));
+    free(seed);
   }
 
   char *path = arg_str(args, "-f");
@@ -766,6 +824,9 @@ void init(ctx_t *ctx, args_t *args) {
     ctx->check_addr33 = true; // default to addr33
   }
 
+  ctx->use_endo = args_bool(args, "-endo");
+  if (ctx->cmd == CMD_MUL) ctx->use_endo = false; // no endo for mul command
+
   pthread_mutex_init(&ctx->lock, NULL);
   int cpus = get_cpu_count();
   ctx->threads_count = MIN(MAX(args_uint(args, "-t", cpus), 1ul), 320ul);
@@ -783,8 +844,8 @@ void init(ctx_t *ctx, args_t *args) {
   load_offs_size(ctx, args);
   queue_init(&ctx->queue, ctx->threads_count * 3);
 
-  printf("threads: %zu ~ addr33: %d ~ addr65: %d | filter: ", //
-         ctx->threads_count, ctx->check_addr33, ctx->check_addr65);
+  printf("threads: %zu ~ addr33: %d ~ addr65: %d ~ endo: %d | filter: ", //
+         ctx->threads_count, ctx->check_addr33, ctx->check_addr65, ctx->use_endo);
 
   if (ctx->to_find_hashes != NULL) printf("list (%'zu)\n", ctx->to_find_count);
   else printf("bloom\n");
@@ -858,6 +919,7 @@ void cleanup() {
   if (_tty_fd >= 0) {
     tcsetattr(_tty_fd, TCSANOW, &_original_termios);
     close(_tty_fd);
+    _tty_fd = -1;
   }
 }
 
@@ -892,5 +954,6 @@ int main(int argc, const char **argv) {
   if (ctx.cmd == CMD_MUL) cmd_mul(&ctx);
   if (ctx.cmd == CMD_RND) cmd_rnd(&ctx);
 
+  cleanup();
   return 0;
 }

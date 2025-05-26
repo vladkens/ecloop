@@ -5,7 +5,6 @@
 #pragma once
 #include <assert.h>
 
-#include "compat.c"
 #include "ecc.c"
 #include "rmd160.c"
 #include "rmd160s.c"

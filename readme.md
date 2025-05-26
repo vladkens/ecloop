@@ -192,20 +192,20 @@ Tests were done on an Intel N100.
 
 ```sh
 > time ./keyhunt -m rmd160 -f ../ecloop/data/btc-puzzles-hash -r 8000:fffffff -t 1 -n 16777216
-3m54s ~ 1.14 MKeys/s
+3m53s ~  1.15 MKeys/s
 
 > time ./ecloop add -f data/btc-puzzles-hash -t 1 -r 8000:fffffff
-1m18s ~ 3.44 MKeys/s
+1m06s ~  4.09 MKeys/s
 ```
 
 ### Multiple threads
 
 ```sh
 > time ./keyhunt -m rmd160 -f ../ecloop/data/btc-puzzles-hash -r 8000:fffffff -t 4 -n 16777216
-1m32s ~ 2.91 MKeys/s
+1m31s ~  2.95 MKeys/s
 
 > time ./ecloop add -f data/btc-puzzles-hash -t 4 -r 8000:fffffff
-0m29s ~ 9.10 MKeys/s
+0m25s ~ 10.73 MKeys/s
 ```
 
 ## Disclaimer
