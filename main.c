@@ -292,7 +292,7 @@ void check_found_add(ctx_t *ctx, fe const start_pk, const pe *points) {
     if (ctx->check_addr65) addr65_batch(hs65, points + i, HASH_BATCH_SIZE);
     for (size_t j = 0; j < HASH_BATCH_SIZE; ++j) {
       if (ctx->check_addr33) check_hash(ctx, true, hs33[j], start_pk, i + j, 0);
-      if (ctx->check_addr33) check_hash(ctx, false, hs65[j], start_pk, i + j, 0);
+      if (ctx->check_addr65) check_hash(ctx, false, hs65[j], start_pk, i + j, 0);
     }
   }
 
