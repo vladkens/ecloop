@@ -206,6 +206,7 @@ GLOBAL fe320 _R2 = {0x896cf21467d7d140, 0x741496c20e7cf878, 0xe697f5e45bcd07c6, 
 GLOBAL u64 _MM64o = 0x4b0dff665588b13f; // 64bits lsb negative inverse of secp256k1 order
 // clang-format on
 
+// https://github.com/albertobsd/keyhunt/blob/main/secp256k1/IntMod.cpp#L1109
 void fe_modn_mul(fe r, const fe a, const fe b) {
   fe320 t = {0}, pr = {0}, p = {0}, rr = {0};
   u64 ml, c;

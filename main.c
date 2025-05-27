@@ -761,6 +761,7 @@ void usage(const char *name) {
   printf("  -r <range>      - search range in hex format (example: 8000:ffff, default all)\n");
   printf("  -d <offs:size>  - bit offset and size for search (example: 128:32, default: 0:32)\n");
   printf("  -q              - quiet mode (no output to stdout; -o required)\n");
+  printf("  -endo           - use endomorphism (default: false)\n");
   printf("\nOther commands:\n");
   printf("  blf-gen         - create bloom filter from list of hex-encoded hash160\n");
   printf("  blf-check       - check bloom filter for given hex-encoded hash160\n");

@@ -51,6 +51,7 @@ Compute options:
   -a <addr_type>  - address type to search: c - addr33, u - addr65 (default: c)
   -r <range>      - search range in hex format (example: 8000:ffff, default all)
   -q              - quiet mode (no output to stdout; -o required)
+  -endo           - use endomorphism (default: false)
 
 Other commands:
   blf-gen         - create bloom filter from list of hex-encoded hash160
@@ -132,7 +133,9 @@ cat data/btc-puzzles-hash | ./ecloop blf-gen -n 1024 -o /tmp/test.blf
 - `-n` specifies the number of entries for the Bloom filter (the number of hashes).
 - `-o` defines the output file where the filter will be written (the `.blf` extension is required).
 
-The Bloom filter uses p = 0.000001 (1 in 1,000,000 false positives). You can adjust this option by modifying `n`. See the [Bloom Filter Calculator](https://hur.st/bloomfilter/?n=1024&p=0.000001&m=&k=20). A list of all addresses can be found [here](https://bitcointalk.org/index.php?topic=5265993.0).
+The Bloom filter uses p = 0.000001 (1 in 1,000,000 false positives). You can adjust this option by modifying `n`. See the [Bloom Filter Calculator](https://hur.st/bloomfilter/?n=1024&p=0.000001&m=&k=20).
+
+A list of all addresses can be found [here](https://bitcointalk.org/index.php?topic=5265993.0) or use [`bcloop`](https://github.com/vladkens/bcloop) to make dump from Bitcoin Node.
 
 Created Bloom filter then can be used in `ecloop` as a filter:
 
