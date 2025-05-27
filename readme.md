@@ -1,6 +1,6 @@
 # ecloop
 
-A high-performance, CPU-optimized tool for computing public keys on the secp256k1 elliptic curve. It includes features for searching both compressed and uncompressed public keys, with customizable search parameters.
+A high-performance, CPU-optimized tool for computing public keys on the secp256k1 elliptic curve. It includes features for searching both compressed and uncompressed public keys, with customizable search parameters. Discuss on [bitcointalk.org](https://bitcointalk.org/index.php?topic=5544649.0).
 
 [<img src="https://badges.ws/badge/-/buy%20me%20a%20coffee/ff813f?icon=buymeacoffee&label" alt="donate" />](https://buymeacoffee.com/vladkens)
 
@@ -11,7 +11,7 @@ A high-performance, CPU-optimized tool for computing public keys on the secp256k
 - 🍇 Precomputed tables for point multiplication
 - 🔍 Search for compressed and uncompressed public keys (hash160)
 - 🌟 Accelerated SHA-256 with SHA extension (both ARM and x86)
-- 🚀 Accelerated RIPEMD-160 using SIMD (NEON for ARM, AVX2 for x86)
+- 🚀 Accelerated RIPEMD-160 [using SIMD](https://vladkens.cc/rmd160-simd/) (AVX2/NEON)
 - 🎲 Random search within customizable bit ranges
 - 🍎 Works seamlessly on macOS and Linux
 - 🔧 Customizable search range and thread count for flexible usage
@@ -233,7 +233,6 @@ Thank you for your support!
 
 ## See also
 
-- Articles about ecloop in [my blog](https://vladkens.cc/tags/ecloop/)
 - [ryancdotorg/brainflayer](https://github.com/ryancdotorg/brainflayer)
 - [albertobsd/keyhunt](https://github.com/albertobsd/keyhunt)
 - [JeanLucPons/VanitySearch](https://github.com/JeanLucPons/VanitySearch)

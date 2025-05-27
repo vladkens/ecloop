@@ -81,3 +81,21 @@ remote:
 	@rsync -arc --progress --delete-after --exclude={'ecloop','found*.txt','.git'} ./ $(host):/tmp/ecloop
 	@ssh -tt $(host) 'clear; $(CC) --version'
 	ssh -tt $(host) 'cd /tmp/ecloop; make $(cmd) CC=$(CC)'
+
+bench-compare:
+	@ssh -tt $(host) " \
+	cd /tmp; rm -rf ecloop keyhunt; \
+	cd /tmp && git clone https://github.com/vladkens/ecloop.git && cd ecloop && make CC=clang; \
+	echo '--------------------------------------------------'; \
+	cd /tmp && git clone https://github.com/albertobsd/keyhunt.git && cd keyhunt && make; \
+	echo '--------------------------------------------------'; \
+	cd /tmp; \
+	echo '--- t=1 (keyhunt)'; \
+	time ./keyhunt/keyhunt -m rmd160 -f ecloop/data/btc-bw-hash -r 8000:fffffff -t 1 -n 16777216; \
+	echo '--- t=1 (ecloop)'; \
+	time ./ecloop/ecloop add -f ecloop/data/btc-bw-hash -t 1 -r 8000:fffffff; \
+	echo '--- t=4 (keyhunt)'; \
+	time ./keyhunt/keyhunt -m rmd160 -f ecloop/data/btc-bw-hash -r 8000:fffffff -t 4 -n 16777216; \
+	echo '--- t=4 (ecloop)'; \
+	time ./ecloop/ecloop add -f ecloop/data/btc-bw-hash -t 4 -r 8000:fffffff; \
+	"
