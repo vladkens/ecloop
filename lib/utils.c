@@ -16,6 +16,13 @@
 #include <time.h>
 #include <unistd.h>
 
+#ifdef _WIN32
+  #include <windows.h>
+#else
+  #include <fcntl.h>
+  #include <termios.h>
+#endif
+
 typedef char hex40[41]; // rmd160 hex string
 typedef char hex64[65]; // sha256 hex string
 typedef u32 h160_t[5];
@@ -60,15 +67,6 @@ char *strtrim(char *str) {
   if (since != until) memmove(str, since, until - since + 2);
 
   return str;
-}
-
-int get_cpu_count() {
-  int cpu_count = sysconf(_SC_NPROCESSORS_ONLN);
-  if (cpu_count == -1) {
-    perror("sysconf: unable to get CPU count, defaulting to 1");
-    return 1;
-  }
-  return cpu_count;
 }
 
 // MARK: random helpers
@@ -529,3 +527,98 @@ void blf_check(args_t *args) {
     printf("%s %s\n", line, found ? "FOUND" : "NOT FOUND");
   }
 }
+
+// Mark: CPU count
+
+int get_cpu_count() {
+#ifdef _WIN32
+  SYSTEM_INFO sysinfo;
+  GetSystemInfo(&sysinfo);
+  return (int)sysinfo.dwNumberOfProcessors;
+#else
+  int cpu_count = sysconf(_SC_NPROCESSORS_ONLN);
+  return MAX(1, cpu_count);
+#endif
+}
+
+// MARK: TTY
+
+typedef void (*tty_cb_t)(void *ctx, const char ch);
+
+typedef struct {
+  tty_cb_t cb;
+  void *ctx;
+} tty_thread_args_t;
+
+#ifdef _WIN32
+
+void tty_cleanup() {}
+void tty_init(tty_cb_t cb, void *ctx) { atexit(tty_cleanup); }
+
+#else
+
+struct termios _orig_termios;
+int _tty_fd = -1;
+
+void *_tty_listener(void *arg) {
+  tty_thread_args_t *args = (tty_thread_args_t *)arg;
+  tty_cb_t cb = args->cb;
+  void *ctx = args->ctx;
+  free(args);
+
+  fd_set fds;
+  char ch;
+
+  while (true) {
+    if (_tty_fd < 0) break;
+
+    // todo: race condition with tty_cleanup
+    int tty_fd = _tty_fd;
+
+    FD_ZERO(&fds);
+    FD_SET(tty_fd, &fds);
+
+    int ret = select(tty_fd + 1, &fds, NULL, NULL, NULL);
+    if (ret < 0) break;
+
+    if (FD_ISSET(tty_fd, &fds)) {
+      if (read(tty_fd, &ch, 1) > 0) {
+        if (cb) cb(ctx, ch);
+      }
+    }
+  }
+
+  return NULL;
+}
+
+void tty_cleanup() {
+  if (_tty_fd < 0) return;
+
+  tcsetattr(_tty_fd, TCSANOW, &_orig_termios);
+  close(_tty_fd);
+  _tty_fd = -1;
+}
+
+void tty_init(tty_cb_t cb, void *ctx) {
+  atexit(tty_cleanup);
+
+  _tty_fd = open("/dev/tty", O_RDONLY | O_NONBLOCK);
+  if (_tty_fd < 0) return;
+
+  tcgetattr(_tty_fd, &_orig_termios);
+
+  struct termios raw = _orig_termios;
+  raw.c_lflag &= ~(ICANON | ECHO); // disable canonical mode and echo
+  tcsetattr(_tty_fd, TCSANOW, &raw);
+
+  tty_thread_args_t *args = malloc(sizeof(tty_thread_args_t));
+  if (!args) return;
+  args->cb = cb;
+  args->ctx = ctx;
+
+  // thread will exit when _tty_fd is closed
+  pthread_t _tty_thread = 0;
+  pthread_create(&_tty_thread, NULL, _tty_listener, args);
+}
+
+#endif

@@ -3,6 +3,7 @@ misc/
 misc-*/
 *.out
 ecloop
+ecloop.exe
 _*.txt
 found_*.txt
 *.blf

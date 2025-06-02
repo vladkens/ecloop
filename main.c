@@ -2,10 +2,10 @@
 // https://github.com/vladkens/ecloop
 // Licensed under the MIT License.
 
-#include <fcntl.h>
 #include <locale.h>
+#include <pthread.h>
 #include <signal.h>
-#include <termios.h>
+#include <unistd.h>
 
 #include "lib/addr.c"
 #include "lib/bench.c"
@@ -37,12 +37,13 @@ typedef struct ctx_t {
   bool quiet;
   bool use_color;
 
-  bool finished;      // true if the program is exiting
-  bool paused;        // true if the program is paused
-  size_t ts_started;  // timestamp of start
-  size_t ts_updated;  // timestamp of last update
-  size_t ts_printed;  // timestamp of last print
-  size_t paused_time; // time spent in paused state
+  bool finished;       // true if the program is exiting
+  bool paused;         // true if the program is paused
+  size_t ts_started;   // timestamp of start
+  size_t ts_updated;   // timestamp of last update
+  size_t ts_printed;   // timestamp of last print
+  size_t ts_paused_at; // timestamp when paused
+  size_t paused_time;  // time spent in paused state
 
   // filter file (bloom filter or hashes to search)
   h160_t *to_find_hashes;
@@ -863,73 +864,27 @@ void init(ctx_t *ctx, args_t *args) {
   printf("----------------------------------------\n");
 }
 
-void *kb_listener(void *arg) {
-  ctx_t *ctx = (ctx_t *)arg;
-
-  int tty_fd = open("/dev/tty", O_RDONLY);
-  if (tty_fd < 0) {
-    perror("open /dev/tty");
-    return NULL;
-  }
-
-  struct termios t;
-  if (tcgetattr(tty_fd, &t) == 0) {
-    t.c_lflag &= ~(ICANON | ECHO);
-    tcsetattr(tty_fd, TCSANOW, &t);
-  }
-
-  size_t ts_paused = 0;
-  fd_set fds;
-  char ch;
-
-  while (true) {
-    FD_ZERO(&fds);
-    FD_SET(tty_fd, &fds);
-
-    int ret = select(tty_fd + 1, &fds, NULL, NULL, NULL);
-    if (ret < 0) {
-      perror("select");
-      break;
-    }
-
-    if (FD_ISSET(tty_fd, &fds)) {
-      if (read(tty_fd, &ch, 1) > 0) {
-        if (ch == 'p' && !ctx->paused) {
-          ts_paused = tsnow();
-          ctx->paused = true;
-          ctx_print_status(ctx);
-        }
-
-        if (ch == 'r' && ctx->paused) {
-          ctx->paused_time += tsnow() - ts_paused;
-          ctx->paused = false;
-          ctx_print_status(ctx);
-        }
-      }
-    }
-  }
-
-  return NULL;
-}
-
-struct termios _original_termios;
-int _tty_fd = -1;
-
-void cleanup() {
-  // restore terminal settings on exit
-  if (_tty_fd >= 0) {
-    tcsetattr(_tty_fd, TCSANOW, &_original_termios);
-    close(_tty_fd);
-    _tty_fd = -1;
-  }
-}
-
 void handle_sigint(int sig) {
   fflush(stderr);
   fflush(stdout);
   printf("\n");
-  cleanup();
   exit(sig);
+}
+
+void tty_cb(void *ctx_raw, const char ch) {
+  ctx_t *ctx = (ctx_t *)ctx_raw;
+
+  if (ch == 'p' && !ctx->paused) {
+    ctx->ts_paused_at = tsnow();
+    ctx->paused = true;
+    ctx_print_status(ctx);
+  }
+
+  if (ch == 'r' && ctx->paused) {
+    ctx->paused_time += tsnow() - ctx->ts_paused_at;
+    ctx->paused = false;
+    ctx_print_status(ctx);
+  }
 }
 
 int main(int argc, const char **argv) {
@@ -940,21 +895,12 @@ int main(int argc, const char **argv) {
   ctx_t ctx = {0};
   init(&ctx, &args);
 
-  // save original terminal settings
-  atexit(cleanup);
-  int _tty_fd = open("/dev/tty", O_RDONLY);
-  if (_tty_fd >= 0) {
-    tcgetattr(_tty_fd, &_original_termios);
-  }
-
-  pthread_t kb_thread;
-  pthread_create(&kb_thread, NULL, kb_listener, &ctx);
   signal(SIGINT, handle_sigint); // Keep last progress line on Ctrl-C
+  tty_init(tty_cb, &ctx);        // override tty to handle pause/resume
 
   if (ctx.cmd == CMD_ADD) cmd_add(&ctx);
   if (ctx.cmd == CMD_MUL) cmd_mul(&ctx);
   if (ctx.cmd == CMD_RND) cmd_rnd(&ctx);
 
-  cleanup();
   return 0;
 }
